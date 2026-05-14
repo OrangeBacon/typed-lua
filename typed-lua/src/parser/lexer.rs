@@ -199,7 +199,7 @@ impl<'a> Lexer<'a> {
 
             '[' => self.square(),
             '"' | '\'' => self.string(ch),
-            '0'..='9' => self.number(),
+            '0'..='9' => self.number(ch),
             'a'..='z' | 'A'..='Z' | '_' => self.ident(),
 
             _ => panic!("Unexpected character '{}' on line {}", ch, self.line),
@@ -239,13 +239,129 @@ impl<'a> Lexer<'a> {
     }
 
     /// Parse number literals
-    fn number(&mut self) -> Token<'a> {
-        todo!()
+    fn number(&mut self, start: char) -> Token<'a> {
+        if start == '0'
+            && matches!(self.peek(), Some('x' | 'X'))
+            && matches!(self.peek_next(), Some('0'..='9' | 'a'..='f' | 'A'..='F'))
+        {
+            self.current.nth(1);
+            self.hex()
+        } else {
+            self.decimal()
+        }
+    }
+
+    /// Parse a decimal number literal
+    fn decimal(&mut self) -> Token<'a> {
+        while matches!(self.peek(), Some('0'..='9')) {
+            self.current.next();
+        }
+
+        // fractional part
+        if self.peek() == Some('.') && matches!(self.peek_next(), Some('0'..='9')) {
+            self.current.nth(1);
+            while matches!(self.peek(), Some('0'..='9')) {
+                self.current.next();
+            }
+        }
+
+        // possibly exponent
+        let mut peek = self.current.clone().peekable();
+        if matches!(peek.next(), Some('e' | 'E')) {
+            let mut signed = false;
+            if matches!(peek.peek(), Some('+' | '-')) {
+                peek.next();
+                signed = true;
+            }
+
+            // found exponent, skip through it
+            if matches!(peek.next(), Some('0'..='9')) {
+                self.current.nth(usize::from(signed));
+                while matches!(self.peek(), Some('0'..='9')) {
+                    self.current.next();
+                }
+            }
+        }
+
+        self.tok(TokenKind::Number)
+    }
+
+    /// Parse a hexadecimal number literal
+    fn hex(&mut self) -> Token<'a> {
+        while matches!(self.peek(), Some('0'..='9' | 'a'..='f' | 'A'..='F')) {
+            self.current.next();
+        }
+
+        // fractional part
+        if self.peek() == Some('.')
+            && matches!(self.peek_next(), Some('0'..='9' | 'a'..='f' | 'A'..='F'))
+        {
+            self.current.nth(1);
+            while matches!(self.peek(), Some('0'..='9' | 'a'..='f' | 'A'..='F')) {
+                self.current.next();
+            }
+        }
+
+        // possibly exponent
+        let mut peek = self.current.clone().peekable();
+        if matches!(peek.next(), Some('p' | 'P')) {
+            let mut signed = false;
+            if matches!(peek.peek(), Some('+' | '-')) {
+                peek.next();
+                signed = true;
+            }
+
+            // found exponent, skip through it
+            // (exponents must be binary, not hex)
+            if matches!(peek.next(), Some('0'..='9')) {
+                self.current.nth(usize::from(signed));
+                while matches!(self.peek(), Some('0'..='9')) {
+                    self.current.next();
+                }
+            }
+        }
+
+        self.tok(TokenKind::Number)
     }
 
     /// Parse an identifier
     fn ident(&mut self) -> Token<'a> {
-        todo!()
+        while let Some(peek) = self.peek()
+            && (peek.is_ascii_alphanumeric() || peek == '_')
+        {
+            self.current.next();
+        }
+
+        let mut tok = self.tok(TokenKind::Name);
+
+        tok.kind = match tok.value {
+            "and" => TokenKind::And,
+            "break" => TokenKind::Break,
+            "do" => TokenKind::Do,
+            "else" => TokenKind::Else,
+            "elseif" => TokenKind::Elseif,
+            "end" => TokenKind::End,
+            "false" => TokenKind::False,
+            "for" => TokenKind::For,
+            "function" => TokenKind::Function,
+            "global" => TokenKind::Global,
+            "goto" => TokenKind::Goto,
+            "if" => TokenKind::If,
+            "in" => TokenKind::In,
+            "local" => TokenKind::Local,
+            "nil" => TokenKind::Nil,
+            "not" => TokenKind::Not,
+            "or" => TokenKind::Or,
+            "repeat" => TokenKind::Repeat,
+            "return" => TokenKind::Return,
+            "then" => TokenKind::Then,
+            "true" => TokenKind::True,
+            "until" => TokenKind::Until,
+            "while" => TokenKind::While,
+            _ => TokenKind::Name,
+        };
+
+        tok
     }
 
     /// Skip all whitespace and comments
