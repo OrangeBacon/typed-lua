@@ -197,10 +197,55 @@ impl<'a> Lexer<'a> {
                 }
             }
 
-            '[' => self.tok(TokenKind::LeftSquare),
+            '[' => self.square(),
+            '"' | '\'' => self.string(ch),
+            '0'..='9' => self.number(),
+            'a'..='z' | 'A'..='Z' | '_' => self.ident(),
 
             _ => panic!("Unexpected character '{}' on line {}", ch, self.line),
         }
+    }
+
+    /// Parse tokens starting with a '['
+    fn square(&mut self) -> Token<'a> {
+        if let Some(len) = self.open_long_bracket(true) {
+            while !self.close_long_bracket(len) {
+                if self.current.next().is_none() {
+                    panic!("Unexpected EOF while parsing string on line {}", self.line)
+                }
+            }
+
+            self.tok(TokenKind::String)
+        } else {
+            self.tok(TokenKind::LeftSquare)
+        }
+    }
+
+    /// Parse a string literal, does not validate escape sequences
+    fn string(&mut self, start: char) -> Token<'a> {
+        while let Some(ch) = self.current.next() {
+            if ch == '\\' {
+                self.current.next();
+            } else if ch == start {
+                break;
+            }
+        }
+
+        let tok = self.tok(TokenKind::String);
+        if !tok.value.ends_with(start) {
+            panic!("Unterminated string at line {}", self.line)
+        }
+        tok
+    }
+
+    /// Parse number literals
+    fn number(&mut self) -> Token<'a> {
+        todo!()
+    }
+
+    /// Parse an identifier
+    fn ident(&mut self) -> Token<'a> {
+        todo!()
     }
 
     /// Skip all whitespace and comments
@@ -240,7 +285,7 @@ impl<'a> Lexer<'a> {
         // consume the '--'
         self.current.nth(1);
 
-        if let Some(len) = self.open_long_bracket() {
+        if let Some(len) = self.open_long_bracket(false) {
             while !self.close_long_bracket(len) {
                 if self.current.next().is_none() {
                     panic!(
@@ -261,11 +306,12 @@ impl<'a> Lexer<'a> {
     }
 
     /// Try to parse an opening long bracket, if succeeded return its length,
-    /// otherwise don't consume anything.
-    fn open_long_bracket(&mut self) -> Option<usize> {
+    /// otherwise don't consume anything.  If the leading '[' has already been
+    /// consumed from the stream, pass true as the argument.
+    fn open_long_bracket(&mut self, opened: bool) -> Option<usize> {
         let mut peek = self.current.clone().peekable();
 
-        if peek.next() != Some('[') {
+        if !opened && peek.next() != Some('[') {
             return None;
         }
 
