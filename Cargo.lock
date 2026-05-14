@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "typed-lua",
+]
+
+[[package]]
 name = "typed-lua"
 version = "0.1.0"
