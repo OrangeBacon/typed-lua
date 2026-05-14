@@ -3,7 +3,7 @@ mod parser;
 pub use parser::lexer::Lexer;
 
 pub fn run() {
-    println!("{}", Lexer::new(";^:&::"));
+    println!("{}", Lexer::new(";^:&--[==[aaa]===]]==]::--hi\n--[[]];"));
 }
 
 #[cfg(test)]

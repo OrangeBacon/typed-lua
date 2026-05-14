@@ -108,6 +108,8 @@ impl<'a> Lexer<'a> {
     /// Get the next token.  Will return an EOF token forever if at the end of
     /// the source file.
     fn next(&mut self) -> Token<'a> {
+        self.skip_whitespace();
+
         self.start = self.current.as_str();
 
         let Some(ch) = self.current.next() else {
@@ -128,7 +130,6 @@ impl<'a> Lexer<'a> {
             ')' => self.tok(TokenKind::RightParen),
             '{' => self.tok(TokenKind::LeftCurly),
             '}' => self.tok(TokenKind::RightCurly),
-            '[' => self.tok(TokenKind::LeftSquare),
             ']' => self.tok(TokenKind::RightSquare),
             ';' => self.tok(TokenKind::SemiColon),
 
@@ -195,8 +196,120 @@ impl<'a> Lexer<'a> {
                     self.tok(TokenKind::Dot)
                 }
             }
+
+            '[' => self.tok(TokenKind::LeftSquare),
+
             _ => panic!("Unexpected character '{}' on line {}", ch, self.line),
         }
+    }
+
+    /// Skip all whitespace and comments
+    fn skip_whitespace(&mut self) {
+        loop {
+            let Some(ch) = self.peek() else {
+                return;
+            };
+
+            match ch {
+                ' ' | '\r' | '\t' | '\x0B' | '\x0C' => {
+                    self.current.next();
+                }
+                '\n' => {
+                    self.line += 1;
+                    self.current.next();
+                }
+                '-' => {
+                    if !self.comment() {
+                        return;
+                    }
+                }
+
+                _ => return,
+            }
+        }
+    }
+
+    /// Attempt to skip a comment, assuming that a '-' has already been peeked.
+    /// Returns true if it skipped anything and false if no comment was detected.
+    fn comment(&mut self) -> bool {
+        // check is a '--'
+        if self.peek_next() != Some('-') {
+            return false;
+        }
+
+        // consume the '--'
+        self.current.nth(1);
+
+        if let Some(len) = self.open_long_bracket() {
+            while !self.close_long_bracket(len) {
+                if self.current.next().is_none() {
+                    panic!(
+                        "Unexpected EOF while parsing long comment on line {}",
+                        self.line
+                    )
+                }
+            }
+        } else {
+            while let Some(ch) = self.peek()
+                && ch != '\n'
+            {
+                self.current.next();
+            }
+        }
+
+        true
+    }
+
+    /// Try to parse an opening long bracket, if succeeded return its length,
+    /// otherwise don't consume anything.
+    fn open_long_bracket(&mut self) -> Option<usize> {
+        let mut peek = self.current.clone().peekable();
+
+        if peek.next() != Some('[') {
+            return None;
+        }
+
+        let mut length = 0;
+        while peek.peek() == Some(&'=') {
+            length += 1;
+            peek.next();
+        }
+
+        if peek.next() != Some('[') {
+            return None;
+        }
+
+        // succeeded in parsing, so consume the long bracket, +2 for each `[`,
+        // - 1 for 0 indexing
+        self.current.nth(length + 1);
+
+        Some(length)
+    }
+
+    /// Try to parse a closing long bracket, if succeeded return true, otherwise
+    /// don't consume anything and return false
+    fn close_long_bracket(&mut self, len: usize) -> bool {
+        let mut peek = self.current.clone();
+
+        if peek.next() != Some(']') {
+            return false;
+        }
+
+        for _ in 0..len {
+            if peek.next() != Some('=') {
+                return false;
+            }
+        }
+
+        if peek.next() != Some(']') {
+            return false;
+        }
+
+        // succeeded in parsing, so consume the long bracket, + 2 for each `[`,
+        // - 1 for 0 indexing
+        self.current.nth(len + 1);
+
+        true
     }
 
     /// If the next character is the input, consume it and return true, otherwise
@@ -213,6 +326,11 @@ impl<'a> Lexer<'a> {
     /// Get the next character without consuming it
     fn peek(&self) -> Option<char> {
         self.current.clone().next()
+    }
+
+    /// Get the character after next without consuming it
+    fn peek_next(&self) -> Option<char> {
+        self.current.clone().nth(1)
     }
 
     /// Create a token all characters consumed so far this token
