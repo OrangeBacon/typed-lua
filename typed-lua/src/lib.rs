@@ -1,3 +1,3 @@
 mod parser;
 
-pub use parser::lexer::Lexer;
+pub use parser::{ast::Block, lexer::Lexer};

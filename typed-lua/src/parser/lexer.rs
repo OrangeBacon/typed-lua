@@ -10,7 +10,7 @@ pub struct Lexer<'a> {
 
 /// A single section of input source code
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Token<'a> {
+pub struct Token<'a> {
     kind: TokenKind,
     value: &'a str,
     line: usize,
