@@ -1,9 +1,6 @@
 use crate::{
     Lexer,
-    parser::{
-        ast::BinaryOperator,
-        lexer::{Token, TokenKind},
-    },
+    parser::lexer::{Token, TokenKind},
 };
 
 pub mod ast;
@@ -143,6 +140,9 @@ fn unary<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     let expr = Box::new(this.parse_precedence(Precedence::Unary));
     let op = match operator_type {
         TokenKind::Minus => ast::UnaryOperator::Negate,
+        TokenKind::Tilde => ast::UnaryOperator::Tilde,
+        TokenKind::Hash => ast::UnaryOperator::Hash,
+        TokenKind::Not => ast::UnaryOperator::Not,
         _ => unreachable!(),
     };
 
@@ -156,11 +156,45 @@ fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expressio
     let expr = this.parse_precedence(rule.precedence.next());
 
     let op = match operator_type {
-        TokenKind::Plus => BinaryOperator::Plus,
-        TokenKind::Minus => BinaryOperator::Minus,
-        TokenKind::Star => BinaryOperator::Multiply,
-        TokenKind::Slash => BinaryOperator::Divide,
-        _ => unreachable!(), // Unreachable.
+        TokenKind::Plus => ast::BinaryOperator::Plus,
+        TokenKind::Minus => ast::BinaryOperator::Minus,
+        TokenKind::Star => ast::BinaryOperator::Multiply,
+        TokenKind::Slash => ast::BinaryOperator::Divide,
+        TokenKind::SlashSlash => ast::BinaryOperator::FloorDivide,
+        TokenKind::Percent => ast::BinaryOperator::Modulo,
+        TokenKind::LessLess => ast::BinaryOperator::LeftShift,
+        TokenKind::GreaterGreater => ast::BinaryOperator::RightShift,
+        TokenKind::Ampersand => ast::BinaryOperator::BitAnd,
+        TokenKind::Tilde => ast::BinaryOperator::BitXor,
+        TokenKind::Bar => ast::BinaryOperator::BitOr,
+        TokenKind::Or => ast::BinaryOperator::Or,
+        TokenKind::And => ast::BinaryOperator::And,
+        TokenKind::Less => ast::BinaryOperator::Less,
+        TokenKind::Greater => ast::BinaryOperator::Greater,
+        TokenKind::LessEqual => ast::BinaryOperator::LessEqual,
+        TokenKind::GreaterEqual => ast::BinaryOperator::GreaterEqual,
+        TokenKind::TildeEqual => ast::BinaryOperator::NotEqual,
+        TokenKind::EqualEqual => ast::BinaryOperator::Equal,
+        _ => unreachable!(),
+    };
+
+    ast::Expression::Binary {
+        left: Box::new(lhs),
+        op,
+        right: Box::new(expr),
+    }
+}
+
+/// Parse a right associative binary operator
+fn right<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression<'a> {
+    let operator_type = this.previous.kind;
+    let rule = ParseRule::get(operator_type);
+    let expr = this.parse_precedence(rule.precedence);
+
+    let op = match operator_type {
+        TokenKind::DotDot => ast::BinaryOperator::Concat,
+        TokenKind::Caret => ast::BinaryOperator::Exponent,
+        _ => unreachable!(),
     };
 
     ast::Expression::Binary {
@@ -171,6 +205,7 @@ fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expressio
 }
 
 impl Precedence {
+    /// Convert a precedence into an empty parse rule
     fn into(self) -> ParseRule {
         ParseRule {
             prefix: None,
@@ -179,6 +214,7 @@ impl Precedence {
         }
     }
 
+    /// Create a parse rule with the given precedence and prefix parser
     fn prefix(self, f: PrefixFn) -> ParseRule {
         ParseRule {
             prefix: Some(f),
@@ -187,6 +223,7 @@ impl Precedence {
         }
     }
 
+    /// Create a parse rule with the given precedence and postfix parser
     fn postfix(self, f: PostfixFn) -> ParseRule {
         ParseRule {
             prefix: None,
@@ -195,6 +232,7 @@ impl Precedence {
         }
     }
 
+    /// Get the next highest precedence after this one
     fn next(self) -> Precedence {
         match self {
             Precedence::None => Precedence::OrPrec,
@@ -217,12 +255,14 @@ impl Precedence {
 }
 
 impl ParseRule {
+    /// Add a postfix parser to this parse rule
     fn postfix(self, f: PostfixFn) -> Self {
         Self {
             postfix: Some(f),
             ..self
         }
     }
+
     /// Get a parse rule for the provided token kind
     fn get(tok: TokenKind) -> Self {
         use Precedence::*;
@@ -233,11 +273,11 @@ impl ParseRule {
             Plus => Additive.postfix(binary),
             Minus => Additive.prefix(unary).postfix(binary),
             Star => Multiplicative.postfix(binary),
-            Percent => None.into(),
-            Caret => None.into(),
-            Hash => None.into(),
-            Ampersand => None.into(),
-            Bar => None.into(),
+            Percent => Multiplicative.postfix(binary),
+            Caret => Exponent.postfix(right),
+            Hash => None.prefix(unary),
+            Ampersand => BitAnd.postfix(binary),
+            Bar => BitOr.postfix(binary),
             Comma => None.into(),
             LeftParen => None.prefix(grouping),
             RightParen => None.into(),
@@ -246,27 +286,27 @@ impl ParseRule {
             LeftSquare => None.into(),
             RightSquare => None.into(),
             SemiColon => None.into(),
-            Less => None.into(),
-            LessLess => None.into(),
-            LessEqual => None.into(),
-            Greater => None.into(),
-            GreaterGreater => None.into(),
-            GreaterEqual => None.into(),
+            Less => Relation.postfix(binary),
+            LessLess => Shift.postfix(binary),
+            LessEqual => Relation.postfix(binary),
+            Greater => Relation.postfix(binary),
+            GreaterGreater => Shift.postfix(binary),
+            GreaterEqual => Relation.postfix(binary),
             Slash => Multiplicative.postfix(binary),
-            SlashSlash => None.into(),
+            SlashSlash => Multiplicative.postfix(binary),
             Equal => None.into(),
-            EqualEqual => None.into(),
-            Tilde => None.into(),
-            TildeEqual => None.into(),
+            EqualEqual => Relation.postfix(binary),
+            Tilde => None.prefix(unary).postfix(binary),
+            TildeEqual => Relation.postfix(binary),
             Colon => None.into(),
             ColonColon => None.into(),
             Dot => None.into(),
-            DotDot => None.into(),
+            DotDot => Concat.postfix(right),
             DotDotDot => None.into(),
             Name => None.into(),
             String => None.into(),
             Number => None.prefix(number),
-            And => None.into(),
+            And => AndPrec.postfix(binary),
             Break => None.into(),
             Do => None.into(),
             Else => None.into(),
@@ -281,8 +321,8 @@ impl ParseRule {
             In => None.into(),
             Local => None.into(),
             Nil => None.into(),
-            Not => None.into(),
-            Or => None.into(),
+            Not => None.prefix(unary),
+            Or => OrPrec.postfix(binary),
             Repeat => None.into(),
             Return => None.into(),
             Then => None.into(),
