@@ -9,9 +9,9 @@ use crate::parser::lexer::Token;
 /// chunk ::= block
 /// block ::= {stat} [retstat]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Block<'a> {
-    statements: Vec<Statement<'a>>,
-    ret_stat: Option<ReturnStatement<'a>>,
+pub struct Block<'a> {
+    pub statements: Vec<Statement<'a>>,
+    pub ret_stat: Option<ReturnStatement<'a>>,
 }
 
 /// stat ::=  ‘;’ |
@@ -33,7 +33,7 @@ struct Block<'a> {
 ///      global attnamelist [‘=’ explist] |
 ///      global [attrib] ‘*’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Statement<'a> {
+pub enum Statement<'a> {
     Empty,
     Assign {
         vars: Vec<Var<'a>>,
@@ -106,14 +106,14 @@ struct Attribute<'a> {
 
 /// retstat ::= return [explist] [‘;’]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ReturnStatement<'a> {
-    exprs: Vec<Expression<'a>>,
+pub struct ReturnStatement<'a> {
+    pub exprs: Vec<Expression<'a>>,
 }
 
 /// label ::= ‘::’ Name ‘::’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Label<'a> {
-    name: Token<'a>,
+pub struct Label<'a> {
+    pub name: Token<'a>,
 }
 
 /// funcname ::= Name {‘.’ Name} [‘:’ Name]

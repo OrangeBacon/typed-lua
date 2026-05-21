@@ -76,6 +76,16 @@ impl<'a> Parser<'a> {
         self.error_current(msg)
     }
 
+    /// If the next token is of the provided type, consume it and return true,
+    /// otherwise don't and return false.
+    fn check(&mut self, kind: TokenKind) -> bool {
+        if self.current.kind == kind {
+            self.advance();
+            return true;
+        }
+        false
+    }
+
     /// Panic with a syntax error referring to the provided token
     fn error_at(&self, token: Token<'a>, msg: &str) -> ! {
         let pos = match token.kind {
@@ -95,17 +105,85 @@ impl<'a> Parser<'a> {
         self.error_at(self.previous, msg)
     }
 
+    /// Run the parser for a full source file and get the output tree.
+    pub fn file(&mut self) -> ast::Block<'a> {
+        let ret = self.block();
+
+        if !self.check(TokenKind::Eof) {
+            self.error_current(
+                "Unexpected content after file content (return statements terminate a source file)",
+            );
+        }
+        ret
+    }
+
+    /// Parse a block (= function body, file, etc)
+    fn block(&mut self) -> ast::Block<'a> {
+        let mut content = vec![];
+
+        while !self.check(TokenKind::Eof) {
+            if let Some(s) = self.statement() {
+                content.push(s);
+            } else {
+                break;
+            }
+        }
+
+        let mut ret = None;
+        if self.check(TokenKind::Return) {
+            ret = Some(self.return_statement());
+        }
+
+        ast::Block {
+            statements: content,
+            ret_stat: ret,
+        }
+    }
+
+    /// Try to get a statement, if possible, otherwise return None
+    fn statement(&mut self) -> Option<ast::Statement<'a>> {
+        if self.check(TokenKind::SemiColon) {
+            Some(ast::Statement::Empty)
+        } else if self.check(TokenKind::ColonColon) {
+            Some(ast::Statement::Label(self.label()))
+        } else if self.check(TokenKind::Break) {
+            Some(ast::Statement::Break)
+        } else if self.check(TokenKind::Goto) {
+            self.consume(TokenKind::Name, "Expected Name after goto");
+            Some(ast::Statement::Goto(self.previous))
+        } else {
+            None
+        }
+    }
+
+    /// Parse a return statement
+    fn return_statement(&mut self) -> ast::ReturnStatement<'a> {
+        let content = self.comma(Self::expression).unwrap_or_default();
+
+        self.check(TokenKind::SemiColon);
+
+        ast::ReturnStatement { exprs: content }
+    }
+
+    /// Parse a goto label declaration
+    fn label(&mut self) -> ast::Label<'a> {
+        self.consume(TokenKind::Name, "Expected label name after `::`");
+        let ret = ast::Label {
+            name: self.previous,
+        };
+        self.consume(TokenKind::ColonColon, "Expected `::` after label name");
+        ret
+    }
+
     /// Parse an expression
-    pub fn expression(&mut self) -> ast::Expression<'a> {
+    fn expression(&mut self) -> Option<ast::Expression<'a>> {
         self.parse_precedence(Precedence::OrPrec)
     }
 
     /// Parse an expression with the given precedence
-    fn parse_precedence(&mut self, prec: Precedence) -> ast::Expression<'a> {
+    fn parse_precedence(&mut self, prec: Precedence) -> Option<ast::Expression<'a>> {
         self.advance();
-        let Some(prefix_rule) = ParseRule::get(self.previous.kind).prefix else {
-            self.error("Expect expression.");
-        };
+        let prefix_rule = ParseRule::get(self.previous.kind).prefix?;
 
         let mut expr = prefix_rule(self);
 
@@ -117,7 +195,24 @@ impl<'a> Parser<'a> {
             expr = infix_rule(self, expr);
         }
 
-        expr
+        Some(expr)
+    }
+
+    /// Parse a comma separated list, using the provided parser.  Errors if a
+    /// trailing comma is parsed.  If the provided parser returns None:
+    /// - if no items parsed, the whole method returns None
+    /// - otherwise, ends the comma separated list.
+    fn comma<T>(&mut self, mut f: impl FnMut(&mut Self) -> Option<T>) -> Option<Vec<T>> {
+        let mut res = vec![f(self)?];
+
+        while self.check(TokenKind::Comma) {
+            let Some(t) = f(self) else {
+                self.error("Unexpected trailing comma");
+            };
+            res.push(t);
+        }
+
+        Some(res)
     }
 }
 
@@ -153,7 +248,11 @@ fn nil<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
 
 /// Parse a parenthesised group
 fn grouping<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
-    let expr = Box::new(this.expression());
+    let Some(expr) = this.expression() else {
+        this.error("Expected expression within `()` group");
+    };
+
+    let expr = Box::new(expr);
     this.consume(TokenKind::RightParen, "Expected ')' after expression.");
     ast::Expression::Prefix(ast::PrefixExpression::Expr(expr))
 }
@@ -162,7 +261,11 @@ fn grouping<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
 fn unary<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     let operator_type = this.previous.kind;
 
-    let expr = Box::new(this.parse_precedence(Precedence::Unary));
+    let Some(expr) = this.parse_precedence(Precedence::Unary) else {
+        this.error("Expected expression after operator");
+    };
+    let expr = Box::new(expr);
+
     let op = match operator_type {
         TokenKind::Minus => ast::UnaryOperator::Negate,
         TokenKind::Tilde => ast::UnaryOperator::Tilde,
@@ -178,7 +281,10 @@ fn unary<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
 fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression<'a> {
     let operator_type = this.previous.kind;
     let rule = ParseRule::get(operator_type);
-    let expr = this.parse_precedence(rule.precedence.next());
+
+    let Some(expr) = this.parse_precedence(rule.precedence.next()) else {
+        this.error("Expected expression after operator");
+    };
 
     let op = match operator_type {
         TokenKind::Plus => ast::BinaryOperator::Plus,
@@ -214,7 +320,9 @@ fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expressio
 fn right<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression<'a> {
     let operator_type = this.previous.kind;
     let rule = ParseRule::get(operator_type);
-    let expr = this.parse_precedence(rule.precedence);
+    let Some(expr) = this.parse_precedence(rule.precedence) else {
+        this.error("Expected expression after operator");
+    };
 
     let op = match operator_type {
         TokenKind::DotDot => ast::BinaryOperator::Concat,
