@@ -9,7 +9,7 @@ use crate::parser::lexer::Token;
 /// chunk ::= block
 /// block ::= {stat} [retstat]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Block<'a> {
+struct Block<'a> {
     statements: Vec<Statement<'a>>,
     ret_stat: Option<ReturnStatement<'a>>,
 }
@@ -146,7 +146,7 @@ enum Var<'a> {
 /// exp ::=  nil | false | true | Numeral | LiteralString | ‘...’ | functiondef |
 ///      prefixexp | tableconstructor | exp binop exp | unop exp
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Expression<'a> {
+pub enum Expression<'a> {
     Nil,
     False,
     True,
@@ -169,7 +169,7 @@ enum Expression<'a> {
 
 /// prefixexp ::= var | functioncall | ‘(’ exp ‘)’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum PrefixExpression<'a> {
+pub enum PrefixExpression<'a> {
     Var(Box<Var<'a>>),
     Call(FunctionCall<'a>),
     Expr(Box<Expression<'a>>),
@@ -236,7 +236,7 @@ enum Field<'a> {
 ///      ‘<’ | ‘<=’ | ‘>’ | ‘>=’ | ‘==’ | ‘~=’ |
 ///      and | or
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum BinaryOperator {
+pub enum BinaryOperator {
     Plus,
     Minus,
     Multiply,
@@ -262,7 +262,7 @@ enum BinaryOperator {
 
 /// unop ::= ‘-’ | not | ‘#’ | ‘~’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum UnaryOperator {
+pub enum UnaryOperator {
     Negate,
     Not,
     Hash,

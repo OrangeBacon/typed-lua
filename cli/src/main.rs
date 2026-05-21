@@ -13,8 +13,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let src = std::fs::read_to_string(path)?;
 
     let lexer = typed_lua::Lexer::new(&src);
+    let mut parser = typed_lua::Parser::new(lexer);
+    let expr = parser.expression();
 
-    println!("{lexer}");
+    println!("{expr:?}");
 
     Ok(())
 }

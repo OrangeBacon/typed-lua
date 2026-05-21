@@ -11,14 +11,24 @@ pub struct Lexer<'a> {
 /// A single section of input source code
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Token<'a> {
-    kind: TokenKind,
-    value: &'a str,
-    line: usize,
+    pub kind: TokenKind,
+    pub value: &'a str,
+    pub line: usize,
+}
+
+impl Default for Token<'_> {
+    fn default() -> Self {
+        Self {
+            kind: TokenKind::Eof,
+            value: "",
+            line: 0,
+        }
+    }
 }
 
 /// All possible token kinds
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum TokenKind {
+pub enum TokenKind {
     Eof,
 
     // Single Character Symbols
@@ -107,7 +117,7 @@ impl<'a> Lexer<'a> {
 
     /// Get the next token.  Will return an EOF token forever if at the end of
     /// the source file.
-    fn next(&mut self) -> Token<'a> {
+    pub fn token(&mut self) -> Token<'a> {
         self.skip_whitespace();
 
         self.start = self.current.as_str();
@@ -513,7 +523,7 @@ impl Display for Lexer<'_> {
         let mut this = self.clone();
 
         loop {
-            let token = this.next();
+            let token = this.token();
             if token.line != line {
                 write!(f, "{:4} ", token.line)?;
                 line = token.line;
