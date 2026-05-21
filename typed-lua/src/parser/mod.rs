@@ -35,11 +35,19 @@ enum Precedence {
 }
 
 /// All functions that parse a prefix operator
-type PrefixFn = for<'a, 'b> fn(&'b mut Parser<'a>) -> ast::Expression<'a>;
+type PrefixFn = for<'a> fn(&mut Parser<'a>) -> ast::Expression<'a>;
 
 /// All functions that parse an postfix (or infix) operator.  The argument taken
-/// is the expression on the left hand side of the operator.
-type PostfixFn = for<'a, 'b> fn(&'b mut Parser<'a>, ast::Expression<'a>) -> ast::Expression<'a>;
+/// is the expression on the left hand side of the operator.  Parse functions may
+/// return Err, which signifies that the expression is invalid, based on checking
+/// the provided left hand expression.  The returned expression should be the
+/// provided left hand side expression.  If the expression is valid, the parser
+/// should call `Parser::advance` to consume the operator token that caused the
+/// parser to be called.
+type PostfixFn = for<'a> fn(&mut Parser<'a>, ast::Expression<'a>) -> ExprResult<'a>;
+
+/// Result type for postfix expression parsers
+type ExprResult<'a> = Result<ast::Expression<'a>, ast::Expression<'a>>;
 
 /// Parsers for a given operator token
 struct ParseRule {
@@ -151,6 +159,8 @@ impl<'a> Parser<'a> {
         } else if self.check(TokenKind::Goto) {
             self.consume(TokenKind::Name, "Expected Name after goto");
             Some(ast::Statement::Goto(self.previous))
+        } else if let Some(ast::Expression::Prefix(pre)) = self.parse_precedence(Precedence::Call) {
+            todo!()
         } else {
             None
         }
@@ -182,17 +192,24 @@ impl<'a> Parser<'a> {
 
     /// Parse an expression with the given precedence
     fn parse_precedence(&mut self, prec: Precedence) -> Option<ast::Expression<'a>> {
+        let prefix_rule = ParseRule::get(self.current.kind).prefix?;
         self.advance();
-        let prefix_rule = ParseRule::get(self.previous.kind).prefix?;
 
         let mut expr = prefix_rule(self);
 
-        while prec <= ParseRule::get(self.current.kind).precedence {
-            self.advance();
-            let Some(infix_rule) = ParseRule::get(self.previous.kind).postfix else {
+        while let rule = ParseRule::get(self.current.kind)
+            && prec <= rule.precedence
+        {
+            let Some(infix_rule) = rule.postfix else {
                 break;
             };
-            expr = infix_rule(self, expr);
+            match infix_rule(self, expr) {
+                Ok(postfix) => expr = postfix,
+                Err(postfix) => {
+                    expr = postfix;
+                    break;
+                }
+            };
         }
 
         Some(expr)
@@ -246,6 +263,13 @@ fn nil<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
     ast::Expression::Nil
 }
 
+/// Parse an identifier name
+fn name<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::Prefix(ast::PrefixExpression::Var(Box::new(ast::Var::Name(
+        this.previous,
+    ))))
+}
+
 /// Parse a parenthesised group
 fn grouping<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     let Some(expr) = this.expression() else {
@@ -278,7 +302,9 @@ fn unary<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
 }
 
 /// Parse a binary operator
-fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression<'a> {
+fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    this.advance();
+
     let operator_type = this.previous.kind;
     let rule = ParseRule::get(operator_type);
 
@@ -309,15 +335,17 @@ fn binary<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expressio
         _ => unreachable!(),
     };
 
-    ast::Expression::Binary {
+    Ok(ast::Expression::Binary {
         left: Box::new(lhs),
         op,
         right: Box::new(expr),
-    }
+    })
 }
 
 /// Parse a right associative binary operator
-fn right<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression<'a> {
+fn right<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    this.advance();
+
     let operator_type = this.previous.kind;
     let rule = ParseRule::get(operator_type);
     let Some(expr) = this.parse_precedence(rule.precedence) else {
@@ -330,11 +358,123 @@ fn right<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ast::Expression
         _ => unreachable!(),
     };
 
-    ast::Expression::Binary {
+    Ok(ast::Expression::Binary {
         left: Box::new(lhs),
         op,
         right: Box::new(expr),
-    }
+    })
+}
+
+/// Parse an indexing expression `a[5]`
+fn index<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+    let Some(expr) = this.expression() else {
+        this.error("Expected index expression");
+    };
+    this.consume(TokenKind::RightSquare, "Expected `]` after index");
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Var(
+        Box::new(ast::Var::Index {
+            first: pre,
+            index: expr,
+        }),
+    )))
+}
+
+/// Parse a member access expression `a.b`
+fn dot<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+    this.consume(TokenKind::Name, "Expected identifier after `.`");
+    let name = this.previous;
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Var(
+        Box::new(ast::Var::Dot { first: pre, name }),
+    )))
+}
+
+/// Parse a call with parenthesised arguments `a(1)`
+fn call_args<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+    let args = this.comma(Parser::expression).unwrap_or_default();
+    this.consume(
+        TokenKind::RightParen,
+        "Expected `)` after function arguments",
+    );
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Call(
+        ast::FunctionCall {
+            receiver: Box::new(pre),
+            method_name: None,
+            args: ast::FunctionArgs::Call { exprs: args },
+        },
+    )))
+}
+
+/// Parse a call with parenthesised arguments `a:b(1)`
+fn call_method<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+    this.consume(TokenKind::Name, "Expected method name after `:`");
+    let name = this.previous;
+
+    // args to the method "" | {} | ()
+    let args = if this.check(TokenKind::String) {
+        ast::FunctionArgs::String {
+            value: this.previous,
+        }
+    } else if this.check(TokenKind::LeftCurly) {
+        todo!()
+    } else if this.check(TokenKind::LeftParen) {
+        let args = this.comma(Parser::expression).unwrap_or_default();
+        this.consume(
+            TokenKind::RightParen,
+            "Expected `)` after function arguments",
+        );
+        ast::FunctionArgs::Call { exprs: args }
+    } else {
+        this.error("Expected function arguments after method name")
+    };
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Call(
+        ast::FunctionCall {
+            receiver: Box::new(pre),
+            method_name: Some(name),
+            args,
+        },
+    )))
+}
+
+/// Parse a call with a string argument `a "1"`
+fn call_string<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+    let value = this.previous;
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Call(
+        ast::FunctionCall {
+            receiver: Box::new(pre),
+            method_name: None,
+            args: ast::FunctionArgs::String { value },
+        },
+    )))
 }
 
 impl Precedence {
@@ -377,7 +517,7 @@ impl Precedence {
             Precedence::BitAnd => Precedence::Shift,
             Precedence::Shift => Precedence::Concat,
             Precedence::Concat => Precedence::Additive,
-            Precedence::Additive => Self::Multiplicative,
+            Precedence::Additive => Precedence::Multiplicative,
             Precedence::Multiplicative => Precedence::Unary,
             Precedence::Unary => Precedence::Exponent,
             Precedence::Exponent => Precedence::Call,
@@ -412,11 +552,11 @@ impl ParseRule {
             Ampersand => BitAnd.postfix(binary),
             Bar => BitOr.postfix(binary),
             Comma => None.into(),
-            LeftParen => None.prefix(grouping),
+            LeftParen => Call.prefix(grouping).postfix(call_args),
             RightParen => None.into(),
-            LeftCurly => None.into(),
+            LeftCurly => Call.prefix(todo!()).postfix(todo!()),
             RightCurly => None.into(),
-            LeftSquare => None.into(),
+            LeftSquare => Call.postfix(index),
             RightSquare => None.into(),
             SemiColon => None.into(),
             Less => Relation.postfix(binary),
@@ -431,13 +571,13 @@ impl ParseRule {
             EqualEqual => Relation.postfix(binary),
             Tilde => None.prefix(unary).postfix(binary),
             TildeEqual => Relation.postfix(binary),
-            Colon => None.into(),
+            Colon => Call.postfix(call_method),
             ColonColon => None.into(),
-            Dot => None.into(),
+            Dot => Call.postfix(dot),
             DotDot => Concat.postfix(right),
             DotDotDot => None.prefix(dot_dot_dot),
-            Name => None.into(),
-            String => None.prefix(string),
+            Name => None.prefix(name),
+            String => Call.prefix(string).postfix(call_string),
             Number => None.prefix(number),
             And => AndPrec.postfix(binary),
             Break => None.into(),
@@ -447,7 +587,7 @@ impl ParseRule {
             End => None.into(),
             False => None.prefix(expr_false),
             For => None.into(),
-            Function => None.into(),
+            Function => None.prefix(todo!()),
             Global => None.into(),
             Goto => None.into(),
             If => None.into(),

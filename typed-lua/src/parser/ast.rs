@@ -126,7 +126,7 @@ struct FunctionName<'a> {
 /// varlist ::= var {‘,’ var}
 /// var ::=  Name | prefixexp ‘[’ exp ‘]’ | prefixexp ‘.’ Name
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Var<'a> {
+pub enum Var<'a> {
     Name(Token<'a>),
     Index {
         first: PrefixExpression<'a>,
@@ -177,15 +177,15 @@ pub enum PrefixExpression<'a> {
 
 /// functioncall ::=  prefixexp args | prefixexp ‘:’ Name args
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct FunctionCall<'a> {
-    receiver: Box<PrefixExpression<'a>>,
-    method_name: Option<Token<'a>>,
-    args: FunctionArgs<'a>,
+pub struct FunctionCall<'a> {
+    pub receiver: Box<PrefixExpression<'a>>,
+    pub method_name: Option<Token<'a>>,
+    pub args: FunctionArgs<'a>,
 }
 
 /// args ::=  ‘(’ [explist] ‘)’ | tableconstructor | LiteralString
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum FunctionArgs<'a> {
+pub enum FunctionArgs<'a> {
     Call { exprs: Vec<Expression<'a>> },
     Table { table: FieldList<'a> },
     String { value: Token<'a> },

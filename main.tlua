@@ -1,4 +1,4 @@
 ::Hello::
 break;;
 goto Hello
-return 5+6;
+return a:b()[5].b()"hi"();
