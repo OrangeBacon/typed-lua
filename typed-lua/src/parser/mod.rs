@@ -3,7 +3,7 @@ use crate::{
     parser::lexer::{Token, TokenKind},
 };
 
-pub mod ast;
+mod ast;
 pub mod lexer;
 
 /// Create a syntax tree from a token stream
@@ -124,6 +124,31 @@ impl<'a> Parser<'a> {
 /// Parse a number token
 fn number<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     ast::Expression::Number(this.previous)
+}
+
+/// Parse a string token
+fn string<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::String(this.previous)
+}
+
+/// Parse a boolean true token
+fn expr_true<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::True
+}
+
+/// Parse a boolean false token
+fn expr_false<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::False
+}
+
+/// Parse a `...` token
+fn dot_dot_dot<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::DotDotDot
+}
+
+/// Parse a nil token
+fn nil<'a>(_: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::Nil
 }
 
 /// Parse a parenthesised group
@@ -302,9 +327,9 @@ impl ParseRule {
             ColonColon => None.into(),
             Dot => None.into(),
             DotDot => Concat.postfix(right),
-            DotDotDot => None.into(),
+            DotDotDot => None.prefix(dot_dot_dot),
             Name => None.into(),
-            String => None.into(),
+            String => None.prefix(string),
             Number => None.prefix(number),
             And => AndPrec.postfix(binary),
             Break => None.into(),
@@ -312,7 +337,7 @@ impl ParseRule {
             Else => None.into(),
             Elseif => None.into(),
             End => None.into(),
-            False => None.into(),
+            False => None.prefix(expr_false),
             For => None.into(),
             Function => None.into(),
             Global => None.into(),
@@ -320,13 +345,13 @@ impl ParseRule {
             If => None.into(),
             In => None.into(),
             Local => None.into(),
-            Nil => None.into(),
+            Nil => None.prefix(nil),
             Not => None.prefix(unary),
             Or => OrPrec.postfix(binary),
             Repeat => None.into(),
             Return => None.into(),
             Then => None.into(),
-            True => None.into(),
+            True => None.prefix(expr_true),
             Until => None.into(),
             While => None.into(),
         }
