@@ -1,4 +1,2 @@
-::Hello::
-break;;
-goto Hello
-return a:b()[5].b()"hi"();
+a()
+a["7"].b,b = 5,7

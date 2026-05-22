@@ -160,7 +160,7 @@ impl<'a> Parser<'a> {
             self.consume(TokenKind::Name, "Expected Name after goto");
             Some(ast::Statement::Goto(self.previous))
         } else if let Some(ast::Expression::Prefix(pre)) = self.parse_precedence(Precedence::Call) {
-            todo!()
+            Some(self.prefix_statement(pre))
         } else {
             None
         }
@@ -183,6 +183,39 @@ impl<'a> Parser<'a> {
         };
         self.consume(TokenKind::ColonColon, "Expected `::` after label name");
         ret
+    }
+
+    /// Parse an assignment or function call statement
+    fn prefix_statement(&mut self, pre: ast::PrefixExpression<'a>) -> ast::Statement<'a> {
+        match pre {
+            ast::PrefixExpression::Var(var) => self.assignment(*var),
+            ast::PrefixExpression::Call(call) => ast::Statement::Call(call),
+            ast::PrefixExpression::Expr(_) => self.error("Unexpected parenthesised expression"),
+        }
+    }
+
+    /// Parse an assignment statement
+    fn assignment(&mut self, lhs: ast::Var<'a>) -> ast::Statement<'a> {
+        let mut lhs = vec![lhs];
+
+        if self.check(TokenKind::Comma) {
+            let vars = self
+                .comma(|s| s.parse_precedence(Precedence::Call))
+                .unwrap_or_default();
+            lhs.extend(vars.into_iter().map(|v| match v {
+                ast::Expression::Prefix(ast::PrefixExpression::Var(v)) => *v,
+                _ => self.error("Expected variable name expression in assignment"),
+            }));
+        }
+
+        self.consume(TokenKind::Equal, "Expected `=` in assignment");
+
+        let rhs = self.comma(Self::expression).unwrap_or_default();
+
+        ast::Statement::Assign {
+            vars: lhs,
+            exps: rhs,
+        }
     }
 
     /// Parse an expression
