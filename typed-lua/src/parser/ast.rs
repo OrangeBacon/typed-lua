@@ -210,14 +210,14 @@ struct ParameterList<'a> {
 /// tableconstructor ::= ‘{’ [fieldlist] ‘}’
 /// fieldlist ::= field {fieldsep field} [fieldsep]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct FieldList<'a> {
-    fields: Vec<Field<'a>>,
+pub struct FieldList<'a> {
+    pub fields: Vec<Field<'a>>,
 }
 
 // field ::= ‘[’ exp ‘]’ ‘=’ exp | Name ‘=’ exp | exp
 // fieldsep ::= ‘,’ | ‘;’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Field<'a> {
+pub enum Field<'a> {
     Index {
         index: Expression<'a>,
         expr: Expression<'a>,

@@ -159,8 +159,11 @@ impl<'a> Parser<'a> {
         } else if self.check(TokenKind::Goto) {
             self.consume(TokenKind::Name, "Expected Name after goto");
             Some(ast::Statement::Goto(self.previous))
-        } else if let Some(ast::Expression::Prefix(pre)) = self.parse_precedence(Precedence::Call) {
-            Some(self.prefix_statement(pre))
+        } else if let Some(expr) = self.parse_precedence(Precedence::Call) {
+            match expr {
+                ast::Expression::Prefix(pre) => Some(self.prefix_statement(pre)),
+                _ => self.error("Unexpected expression"),
+            }
         } else {
             None
         }
@@ -232,6 +235,7 @@ impl<'a> Parser<'a> {
 
         while let rule = ParseRule::get(self.current.kind)
             && prec <= rule.precedence
+            && !self.check(TokenKind::Eof)
         {
             let Some(infix_rule) = rule.postfix else {
                 break;
@@ -301,6 +305,78 @@ fn name<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     ast::Expression::Prefix(ast::PrefixExpression::Var(Box::new(ast::Var::Name(
         this.previous,
     ))))
+}
+
+/// Parse a table constructor
+fn table<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::Table(table_inner(this))
+}
+
+/// Parse a table constructor
+fn table_inner<'a>(this: &mut Parser<'a>) -> ast::FieldList<'a> {
+    let mut fields = vec![];
+
+    if this.check(TokenKind::RightCurly) {
+        // empty constructor
+        return ast::FieldList { fields };
+    }
+
+    fields.push(field(this));
+    while this.check(TokenKind::Comma) || this.check(TokenKind::SemiColon) {
+        if this.current.kind == TokenKind::RightCurly {
+            break;
+        }
+
+        fields.push(field(this));
+    }
+
+    // field list
+    this.consume(
+        TokenKind::RightCurly,
+        "Expected `}` after table constructor",
+    );
+
+    ast::FieldList { fields }
+}
+
+/// Parse an individual field within a table constructor
+fn field<'a>(this: &mut Parser<'a>) -> ast::Field<'a> {
+    if this.check(TokenKind::LeftSquare) {
+        let Some(lhs) = this.expression() else {
+            this.error("Expected expression inside index field");
+        };
+        this.consume(TokenKind::RightSquare, "Expected `]` after index");
+        this.consume(TokenKind::Equal, "Expected `=` after index");
+        let Some(rhs) = this.expression() else {
+            this.error("Expected expression inside index field");
+        };
+        ast::Field::Index {
+            index: lhs,
+            expr: rhs,
+        }
+    } else if let Some(expr) = this.expression() {
+        if let ast::Expression::Prefix(ast::PrefixExpression::Var(var)) = expr {
+            // attempt to match a `Name = value` assignment
+            if let ast::Var::Name(name) = var.as_ref()
+                && this.check(TokenKind::Equal)
+            {
+                let Some(rhs) = this.expression() else {
+                    this.error("Expected expression after `=`");
+                };
+                return ast::Field::Assign {
+                    name: *name,
+                    expr: rhs,
+                };
+            }
+            return ast::Field::Exp {
+                expr: ast::Expression::Prefix(ast::PrefixExpression::Var(var)),
+            };
+        }
+
+        ast::Field::Exp { expr }
+    } else {
+        this.error("Expected expression or index assignment in table constructor");
+    }
 }
 
 /// Parse a parenthesised group
@@ -471,7 +547,8 @@ fn call_method<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResul
             value: this.previous,
         }
     } else if this.check(TokenKind::LeftCurly) {
-        todo!()
+        let table = table_inner(this);
+        ast::FunctionArgs::Table { table }
     } else if this.check(TokenKind::LeftParen) {
         let args = this.comma(Parser::expression).unwrap_or_default();
         this.consume(
@@ -506,6 +583,25 @@ fn call_string<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResul
             receiver: Box::new(pre),
             method_name: None,
             args: ast::FunctionArgs::String { value },
+        },
+    )))
+}
+
+/// Parse a call with a string argument `a "1"`
+fn call_table<'a>(this: &mut Parser<'a>, lhs: ast::Expression<'a>) -> ExprResult<'a> {
+    let ast::Expression::Prefix(pre) = lhs else {
+        return Err(lhs);
+    };
+
+    this.advance();
+
+    let table = table_inner(this);
+
+    Ok(ast::Expression::Prefix(ast::PrefixExpression::Call(
+        ast::FunctionCall {
+            receiver: Box::new(pre),
+            method_name: None,
+            args: ast::FunctionArgs::Table { table },
         },
     )))
 }
@@ -587,7 +683,7 @@ impl ParseRule {
             Comma => None.into(),
             LeftParen => Call.prefix(grouping).postfix(call_args),
             RightParen => None.into(),
-            LeftCurly => Call.prefix(todo!()).postfix(todo!()),
+            LeftCurly => Call.prefix(table).postfix(call_table),
             RightCurly => None.into(),
             LeftSquare => Call.postfix(index),
             RightSquare => None.into(),
