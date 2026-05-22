@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut parser = typed_lua::Parser::new(lexer);
     let expr = parser.file();
 
-    println!("{expr:?}");
+    println!("{expr}");
 
     Ok(())
 }

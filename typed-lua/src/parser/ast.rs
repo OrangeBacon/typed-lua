@@ -86,22 +86,22 @@ pub enum Statement<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Visibility {
+pub enum Visibility {
     Local,
     Global,
 }
 
 // attnamelist ::=  [attrib] Name [attrib] {‘,’ Name [attrib]}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct AttributeNameList<'a> {
-    attr: Attribute<'a>,
-    names: Vec<(Token<'a>, Option<Attribute<'a>>)>,
+pub struct AttributeNameList<'a> {
+    pub attr: Attribute<'a>,
+    pub names: Vec<(Token<'a>, Option<Attribute<'a>>)>,
 }
 
 /// attrib ::= ‘<’ Name ‘>’
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Attribute<'a> {
-    name: Token<'a>,
+pub struct Attribute<'a> {
+    pub name: Token<'a>,
 }
 
 /// retstat ::= return [explist] [‘;’]
@@ -118,9 +118,9 @@ pub struct Label<'a> {
 
 /// funcname ::= Name {‘.’ Name} [‘:’ Name]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct FunctionName<'a> {
-    names: Vec<Token<'a>>,
-    method: Option<Token<'a>>,
+pub struct FunctionName<'a> {
+    pub names: Vec<Token<'a>>,
+    pub method: Option<Token<'a>>,
 }
 
 /// varlist ::= var {‘,’ var}
@@ -194,17 +194,17 @@ pub enum FunctionArgs<'a> {
 /// functiondef ::= function funcbody
 /// funcbody ::= ‘(’ [parlist] ‘)’ block end
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Function<'a> {
-    parameters: ParameterList<'a>,
-    body: Block<'a>,
+pub struct Function<'a> {
+    pub parameters: ParameterList<'a>,
+    pub body: Block<'a>,
 }
 
 /// parlist ::= namelist [‘,’ varargparam] | varargparam
 /// varargparam ::= ‘...’ [Name]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ParameterList<'a> {
-    names: Vec<Token<'a>>,
-    var_name: Option<Token<'a>>,
+pub struct ParameterList<'a> {
+    pub names: Vec<Token<'a>>,
+    pub var_name: Option<Token<'a>>,
 }
 
 /// tableconstructor ::= ‘{’ [fieldlist] ‘}’

@@ -1,9 +1,15 @@
+use std::fmt::Display;
+
 use crate::{
     Lexer,
-    parser::lexer::{Token, TokenKind},
+    parser::{
+        ast_size::{Size, SizeOf},
+        lexer::{Token, TokenKind},
+    },
 };
 
 mod ast;
+mod ast_size;
 pub mod lexer;
 
 /// Create a syntax tree from a token stream
@@ -732,5 +738,14 @@ impl ParseRule {
             Until => None.into(),
             While => None.into(),
         }
+    }
+}
+
+impl Display for ast::Block<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{self:?}")?;
+        writeln!(f, "Size: {}", Size(self.size()))?;
+
+        Ok(())
     }
 }
