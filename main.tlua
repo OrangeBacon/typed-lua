@@ -1,5 +1,16 @@
-a = {[3] = 7; a = b, 5 + 6}
+do a = {[3] = 7; a = b, 5 + 6}
 a.b:c {
     1,2;
     [a] = [=[hii!!]=]
 }
+end
+repeat
+    print("hi")
+until a < 3
+if a == 5 then
+elseif a == 6 then
+else
+end
+
+for a = 0,10,2 do
+end

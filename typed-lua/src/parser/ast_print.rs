@@ -207,6 +207,7 @@ impl Display for AstPrint<'_, Statement<'_>> {
                 else_block,
             } => {
                 let count = 1 + elseif.len() + else_block.is_some() as usize;
+                self.print_len(f, "If", count)?;
 
                 let a = std::iter::once((expr, block));
                 let b = elseif.iter().map(|(a, b)| (a, b));

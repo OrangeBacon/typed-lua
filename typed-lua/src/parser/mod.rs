@@ -152,22 +152,66 @@ impl<'a> Parser<'a> {
 
     /// Try to get a statement, if possible, otherwise return None
     fn statement(&mut self) -> Option<ast::Statement<'a>> {
-        if self.check(TokenKind::SemiColon) {
-            Some(ast::Statement::Empty)
-        } else if self.check(TokenKind::ColonColon) {
-            Some(ast::Statement::Label(self.label()))
-        } else if self.check(TokenKind::Break) {
-            Some(ast::Statement::Break)
-        } else if self.check(TokenKind::Goto) {
-            self.consume(TokenKind::Name, "Expected Name after goto");
-            Some(ast::Statement::Goto(self.previous))
-        } else if let Some(expr) = self.parse_precedence(Precedence::Call) {
-            match expr {
+        let kind = self.current.kind;
+        match kind {
+            TokenKind::SemiColon => {
+                self.advance();
+                Some(ast::Statement::Empty)
+            }
+            TokenKind::ColonColon => {
+                self.advance();
+                Some(ast::Statement::Label(self.label()))
+            }
+            TokenKind::Break => {
+                self.advance();
+                Some(ast::Statement::Break)
+            }
+            TokenKind::Goto => {
+                self.advance();
+                self.consume(TokenKind::Name, "Expected Name after goto");
+                Some(ast::Statement::Goto(self.previous))
+            }
+            TokenKind::Do => {
+                self.advance();
+                let block = self.block();
+                self.consume(TokenKind::End, "Expected `end` after block");
+                Some(ast::Statement::Block(block))
+            }
+            TokenKind::While => {
+                self.advance();
+                let Some(expr) = self.expression() else {
+                    self.error("Expected while loop condition expression");
+                };
+                self.consume(TokenKind::Do, "Expected `do` after while loop condition");
+                let block = self.block();
+                self.consume(TokenKind::End, "Expected `end` after block");
+                Some(ast::Statement::While { expr, block })
+            }
+            TokenKind::Repeat => {
+                self.advance();
+                let block = self.block();
+                self.consume(TokenKind::Until, "Expected `until` after repeat loop body");
+                let Some(expr) = self.expression() else {
+                    self.error("Expected repeat loop condition expression");
+                };
+                Some(ast::Statement::Repeat { block, expr })
+            }
+            TokenKind::If => {
+                self.advance();
+                Some(self.if_statement())
+            }
+            TokenKind::For => {
+                self.advance();
+                Some(self.for_statement())
+            }
+            TokenKind::Function => todo!(),
+            TokenKind::Local => todo!(),
+            TokenKind::Global => todo!(),
+            _ if let Some(expr) = self.parse_precedence(Precedence::Call) => match expr {
                 ast::Expression::Prefix(pre) => Some(self.prefix_statement(pre)),
                 _ => self.error("Unexpected expression"),
-            }
-        } else {
-            None
+            },
+            _ => None,
         }
     }
 
@@ -220,6 +264,113 @@ impl<'a> Parser<'a> {
         ast::Statement::Assign {
             vars: lhs,
             exps: rhs,
+        }
+    }
+
+    /// Parse an if statement and all elseif/else blocks
+    fn if_statement(&mut self) -> ast::Statement<'a> {
+        let Some(expr) = self.expression() else {
+            self.error("Expected if condition")
+        };
+        self.consume(TokenKind::Then, "Expected `then` after if condition");
+        let block = self.block();
+
+        let mut elseif = vec![];
+        while self.check(TokenKind::Elseif) {
+            let Some(expr) = self.expression() else {
+                self.error("Expected elseif condition")
+            };
+            self.consume(TokenKind::Then, "Expected `then` after elseif condition");
+            let block = self.block();
+            elseif.push((expr, block));
+        }
+
+        let else_block = if self.check(TokenKind::Else) {
+            Some(self.block())
+        } else {
+            None
+        };
+
+        self.consume(TokenKind::End, "Expected `end` after if statement");
+
+        ast::Statement::If {
+            expr,
+            block,
+            elseif,
+            else_block,
+        }
+    }
+
+    /// Parse a for or for-each statement
+    fn for_statement(&mut self) -> ast::Statement<'a> {
+        let Some(names) = self.comma(|this| {
+            if this.check(TokenKind::Name) {
+                Some(this.previous)
+            } else {
+                None
+            }
+        }) else {
+            self.error("Expected list of names for for loop variables");
+        };
+
+        match names.as_slice() {
+            [name] if self.check(TokenKind::Equal) => self.for_numeric(*name),
+            _ if self.check(TokenKind::In) => self.for_each(names),
+            [_] => self.error("Expected `in` or `=` after for loop variable"),
+            _ => self.error("Expected `in` after for loop variables"),
+        }
+    }
+
+    /// Parse a for-each statement
+    fn for_each(&mut self, names: Vec<Token<'a>>) -> ast::Statement<'a> {
+        let Some(exprs) = self.comma(Self::expression) else {
+            self.error("Expected expressions to loop over for for-each loop")
+        };
+
+        self.consume(
+            TokenKind::Do,
+            "Expected `do` after for-each loop expressions",
+        );
+        let block = self.block();
+        self.consume(TokenKind::End, "Expected `end` after for-each loop");
+
+        ast::Statement::ForEach {
+            names,
+            exprs,
+            block,
+        }
+    }
+
+    /// Parse a numeric for loop
+    fn for_numeric(&mut self, name: Token<'a>) -> ast::Statement<'a> {
+        let Some(initial) = self.expression() else {
+            self.error("Expected for loop initial bound")
+        };
+        self.consume(TokenKind::Comma, "Expected comma after initial expression");
+
+        let Some(limit) = self.expression() else {
+            self.error("Expected for loop limit")
+        };
+
+        let step = if self.check(TokenKind::Comma) {
+            let Some(step) = self.expression() else {
+                self.error("Expected for loop step")
+            };
+            Some(step)
+        } else {
+            None
+        };
+
+        self.consume(TokenKind::Do, "Expected `do` after for loop expressions");
+        let block = self.block();
+        self.consume(TokenKind::End, "Expected `end` after for loop");
+
+        ast::Statement::For {
+            name,
+            initial,
+            limit,
+            step,
+            block,
         }
     }
 
