@@ -94,7 +94,7 @@ pub enum Visibility {
 // attnamelist ::=  [attrib] Name [attrib] {‘,’ Name [attrib]}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttributeNameList<'a> {
-    pub attr: Attribute<'a>,
+    pub attr: Option<Attribute<'a>>,
     pub names: Vec<(Token<'a>, Option<Attribute<'a>>)>,
 }
 
@@ -204,7 +204,7 @@ pub struct Function<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ParameterList<'a> {
     pub names: Vec<Token<'a>>,
-    pub var_name: Option<Token<'a>>,
+    pub var_name: Option<Option<Token<'a>>>,
 }
 
 /// tableconstructor ::= ‘{’ [fieldlist] ‘}’

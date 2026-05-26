@@ -1,5 +1,7 @@
 use std::error::Error;
 
+use typed_lua::AstPrint;
+
 /// Incredibly basic commandline code runner
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args();
@@ -14,9 +16,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let lexer = typed_lua::Lexer::new(&src);
     let mut parser = typed_lua::Parser::new(lexer);
-    let expr = parser.file();
+    let block = parser.file();
 
-    println!("{expr}");
+    println!("{}", AstPrint::new(&block));
 
     Ok(())
 }

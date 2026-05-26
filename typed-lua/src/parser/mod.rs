@@ -1,14 +1,10 @@
-use std::fmt::Display;
-
 use crate::{
     Lexer,
-    parser::{
-        ast_size::{Size, SizeOf},
-        lexer::{Token, TokenKind},
-    },
+    parser::lexer::{Token, TokenKind},
 };
 
 mod ast;
+pub mod ast_print;
 mod ast_size;
 pub mod lexer;
 
@@ -738,14 +734,5 @@ impl ParseRule {
             Until => None.into(),
             While => None.into(),
         }
-    }
-}
-
-impl Display for ast::Block<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{self:?}")?;
-        writeln!(f, "Size: {}", Size(self.size()))?;
-
-        Ok(())
     }
 }

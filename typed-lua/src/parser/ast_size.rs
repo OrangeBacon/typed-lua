@@ -44,6 +44,18 @@ impl<T: SizeOf> SizeOf for Box<T> {
     }
 }
 
+impl<T: SizeOf> SizeOf for &T {
+    fn size(&self) -> usize {
+        T::size(self)
+    }
+}
+
+impl SizeOf for &str {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
 impl SizeOf for Token<'_> {
     fn size(&self) -> usize {
         0
