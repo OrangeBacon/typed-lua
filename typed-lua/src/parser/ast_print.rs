@@ -298,7 +298,7 @@ impl Display for AstPrint<'_, AttributeNameList<'_>> {
         let count = self.node.names.len();
         self.print_len(f, "Attribute Names", count)?;
 
-        if let Some(name) = &self.node.attr {
+        if let Some(name) = &self.node.attrib {
             if count == 0 {
                 self.last(name)
             } else {
@@ -480,7 +480,7 @@ impl Display for AstPrint<'_, ParameterList<'_>> {
 
         match self.node.var_name {
             Some(Some(name)) => self.last(&name).name("Var args").fmt(f)?,
-            Some(None) => self.last(&"<un named>").name("Var args").fmt(f)?,
+            Some(None) => self.last(&"<un-named>").name("Var args").fmt(f)?,
             None => (),
         };
 

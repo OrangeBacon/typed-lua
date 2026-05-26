@@ -113,7 +113,7 @@ impl SizeOf for Visibility {
 
 impl SizeOf for AttributeNameList<'_> {
     fn size(&self) -> usize {
-        self.attr.size() + self.names.size()
+        self.attrib.size() + self.names.size()
     }
 }
 

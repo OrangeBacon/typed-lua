@@ -94,7 +94,7 @@ pub enum Visibility {
 // attnamelist ::=  [attrib] Name [attrib] {‘,’ Name [attrib]}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttributeNameList<'a> {
-    pub attr: Option<Attribute<'a>>,
+    pub attrib: Option<Attribute<'a>>,
     pub names: Vec<(Token<'a>, Option<Attribute<'a>>)>,
 }
 

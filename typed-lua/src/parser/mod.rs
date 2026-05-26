@@ -204,9 +204,24 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(self.for_statement())
             }
-            TokenKind::Function => todo!(),
-            TokenKind::Local => todo!(),
-            TokenKind::Global => todo!(),
+            TokenKind::Function => {
+                self.advance();
+                let name = self.function_name();
+                let body = self.function_body();
+                Some(ast::Statement::Function {
+                    name,
+                    body,
+                    vis: None,
+                })
+            }
+            TokenKind::Local => {
+                self.advance();
+                Some(self.local())
+            }
+            TokenKind::Global => {
+                self.advance();
+                Some(self.global())
+            }
             _ if let Some(expr) = self.parse_precedence(Precedence::Call) => match expr {
                 ast::Expression::Prefix(pre) => Some(self.prefix_statement(pre)),
                 _ => self.error("Unexpected expression"),
@@ -374,6 +389,171 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a function name
+    fn function_name(&mut self) -> ast::FunctionName<'a> {
+        self.consume(TokenKind::Name, "Expected function name");
+        let mut names = vec![self.previous];
+
+        while self.check(TokenKind::Dot) {
+            self.consume(TokenKind::Name, "Expected name after `.`");
+            names.push(self.previous);
+        }
+
+        let method = if self.check(TokenKind::Colon) {
+            self.consume(TokenKind::Name, "Expected method name after `:`");
+            Some(self.previous)
+        } else {
+            None
+        };
+
+        ast::FunctionName { names, method }
+    }
+
+    /// Parse the body of a function
+    fn function_body(&mut self) -> ast::Function<'a> {
+        self.consume(
+            TokenKind::LeftParen,
+            "Expected `(` at start of function parameters",
+        );
+        let parameters = self.parameters();
+        self.consume(
+            TokenKind::RightParen,
+            "Expected `)` after function parameters",
+        );
+
+        let body = self.block();
+        self.consume(TokenKind::End, "Expected `end` after function body");
+
+        ast::Function { parameters, body }
+    }
+
+    /// Parse function parameters
+    fn parameters(&mut self) -> ast::ParameterList<'a> {
+        let mut names = vec![];
+        let mut var_name = None;
+
+        loop {
+            if self.check(TokenKind::DotDotDot) {
+                var_name = Some(if self.check(TokenKind::Name) {
+                    Some(self.previous)
+                } else {
+                    None
+                });
+                break;
+            }
+
+            self.consume(TokenKind::Name, "Expected parameter name");
+            names.push(self.previous);
+
+            if !self.check(TokenKind::Comma) {
+                break;
+            }
+        }
+
+        ast::ParameterList { names, var_name }
+    }
+
+    /// Parse a statement beginning with `local`
+    fn local(&mut self) -> ast::Statement<'a> {
+        if self.check(TokenKind::Function) {
+            let name = self.function_name();
+            let body = self.function_body();
+            return ast::Statement::Function {
+                name,
+                body,
+                vis: Some(ast::Visibility::Local),
+            };
+        }
+
+        let attrib = if self.check(TokenKind::Less) {
+            self.consume(TokenKind::Name, "Expected attribute name");
+            let name = ast::Attribute {
+                name: self.previous,
+            };
+            self.consume(TokenKind::Greater, "Expected `>` after attribute name");
+            Some(name)
+        } else {
+            None
+        };
+
+        let names = self.attrib_names();
+        let exprs = if self.check(TokenKind::Equal) {
+            let Some(exprs) = self.comma(Self::expression) else {
+                self.error("Expected expression after `=`")
+            };
+            exprs
+        } else {
+            vec![]
+        };
+
+        ast::Statement::Declare {
+            vis: ast::Visibility::Local,
+            names: ast::AttributeNameList { attrib, names },
+            exprs,
+        }
+    }
+
+    /// Parse a statement beginning with `global`
+    fn global(&mut self) -> ast::Statement<'a> {
+        if self.check(TokenKind::Function) {
+            let name = self.function_name();
+            let body = self.function_body();
+            return ast::Statement::Function {
+                name,
+                body,
+                vis: Some(ast::Visibility::Global),
+            };
+        }
+
+        let attrib = if self.check(TokenKind::Less) {
+            self.consume(TokenKind::Name, "Expected attribute name");
+            let name = ast::Attribute {
+                name: self.previous,
+            };
+            self.consume(TokenKind::Greater, "Expected `>` after attribute name");
+            Some(name)
+        } else {
+            None
+        };
+
+        if self.check(TokenKind::Star) {
+            return ast::Statement::GlobalCollective { attrib };
+        }
+
+        ast::Statement::Declare {
+            vis: ast::Visibility::Global,
+            names: ast::AttributeNameList {
+                attrib,
+                names: self.attrib_names(),
+            },
+            exprs: vec![],
+        }
+    }
+
+    /// Parse the names and attributes within a `local` or `global`
+    fn attrib_names(&mut self) -> Vec<(Token<'a>, Option<ast::Attribute<'a>>)> {
+        let Some(vals) = self.comma(|this| {
+            this.consume(TokenKind::Name, "Expected variable name");
+            let name = this.previous;
+
+            let attrib = if this.check(TokenKind::Less) {
+                this.consume(TokenKind::Name, "Expected attribute name");
+                let name = ast::Attribute {
+                    name: this.previous,
+                };
+                this.consume(TokenKind::Greater, "Expected `>` after attribute name");
+                Some(name)
+            } else {
+                None
+            };
+
+            Some((name, attrib))
+        }) else {
+            self.error("Expected name after `local` or `global`")
+        };
+        vals
+    }
+
     /// Parse an expression
     fn expression(&mut self) -> Option<ast::Expression<'a>> {
         self.parse_precedence(Precedence::OrPrec)
@@ -458,6 +638,11 @@ fn name<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
     ast::Expression::Prefix(ast::PrefixExpression::Var(Box::new(ast::Var::Name(
         this.previous,
     ))))
+}
+
+/// Parse a function (lambda) expression
+fn function<'a>(this: &mut Parser<'a>) -> ast::Expression<'a> {
+    ast::Expression::Function(this.function_body())
 }
 
 /// Parse a table constructor
@@ -869,7 +1054,7 @@ impl ParseRule {
             End => None.into(),
             False => None.prefix(expr_false),
             For => None.into(),
-            Function => None.prefix(todo!()),
+            Function => None.prefix(function),
             Global => None.into(),
             Goto => None.into(),
             If => None.into(),
