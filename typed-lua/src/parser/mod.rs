@@ -520,13 +520,21 @@ impl<'a> Parser<'a> {
             return ast::Statement::GlobalCollective { attrib };
         }
 
+        let names = self.attrib_names();
+
+        let exprs = if self.check(TokenKind::Equal) {
+            let Some(exprs) = self.comma(Self::expression) else {
+                self.error("Expected expression after `=`")
+            };
+            exprs
+        } else {
+            vec![]
+        };
+
         ast::Statement::Declare {
             vis: ast::Visibility::Global,
-            names: ast::AttributeNameList {
-                attrib,
-                names: self.attrib_names(),
-            },
-            exprs: vec![],
+            names: ast::AttributeNameList { attrib, names },
+            exprs,
         }
     }
 
