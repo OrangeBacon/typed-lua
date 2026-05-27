@@ -1,0 +1,316 @@
+//! Result of running name a name resolution pass over the ast.  Modified version
+//! of the ast, but with variable names resolved, and a couple of other syntax changes:
+//! - No lifetime parameters, unlike the ast.
+//! - String literals have escape sequences processed
+//! - Number literals are converted into u64/f64
+//! - Var args are always named with a resolved variable id
+//! - The right side of `.` and `:` operators are string typed until type resolution
+//!   (or potentially after), so uses the string table, not variable table
+//! - Global variables are resolved, so the statements `global *`, `global<const> a`
+//!   etc. are removed as they only have an effect during name resolution.
+//! - Local variable definitions (`local a`, `local a = 5`) are either removed or
+//!   resolved as required.
+//! - Function definition statements with local/global have local/global removed,
+//!   and the variable defined in the variable table. It is checked that the
+//!   local and global ones only have one name (no `.` or `:`) as required in the
+//!   grammar.
+//! - Attributes are resolved into properties on their definition in the variable
+//!   table, rather than being within the tree.  This includes preventing them
+//!   from being string typed (rejecting invalid attributes).  It is checked that
+//!   `<const>` values are not on the left of an assignment.  Statements are inserted
+//!   into the tree to specify when (and therefore the order in which) variables
+//!   are closed, as scope information from declaration is removed when the variables
+//!   are defined.
+//! - Within methods, `self` is resolved to the method that caused it to be defined.
+
+/// Container to associate variables and strings with a provided name tree
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct NameContainer<T> {
+    /// Root of this tree
+    pub tree: T,
+
+    /// Strings used in the program, escape sequence processing, etc is already done.
+    pub string_table: Vec<String>,
+
+    /// Numbers used in the program, stored as a separate table so that `Eq` works
+    /// on the tree (but not this container).
+    pub number_table: Vec<Number>,
+
+    /// All variables defined or used in this tree.
+    pub variable_table: Vec<Variable>,
+}
+
+/// ID of a string within the string table
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StringId(pub u32);
+
+/// ID of a number within the number table
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NumberId(pub u32);
+
+/// ID of a variable name
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VariableId(pub u32);
+
+/// Number in lua, converted from the string representation
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum Number {
+    Integer(u64),
+    Float(f64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Variable {
+    /// Local variables
+    Local {
+        /// Always introduced in a statement
+        line: usize,
+        name: StringId,
+        attr_close: bool,
+        attr_const: bool,
+    },
+
+    /// Global variable
+    Global {
+        /// May be introduced at a variable read
+        line: Option<usize>,
+        name: StringId,
+        attr_const: bool,
+        // attr_close is not valid for globals
+    },
+
+    /// Var args (`...` token)
+    VarArgs { line: usize, name: StringId },
+}
+
+/// A sequence of code.  Note that block and chunk are the same in lua.  A file
+/// contains 1 block.
+/// chunk ::= block
+/// block ::= {stat} [retstat]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub ret_stat: Option<ReturnStatement>,
+}
+
+/// stat ::=  ‘;’ |
+///      varlist ‘=’ explist |
+///      functioncall |
+///      label |
+///      break |
+///      goto Name |
+///      do block end |
+///      while exp do block end |
+///      repeat block until exp |
+///      if exp then block {elseif exp then block} [else block] end |
+///      for Name ‘=’ exp ‘,’ exp [‘,’ exp] do block end |
+///      for namelist in explist do block end |
+///      function funcname funcbody |
+///      local function Name funcbody |
+///      global function Name funcbody |
+///      local attnamelist [‘=’ explist] |
+///      global attnamelist [‘=’ explist] |
+///      global [attrib] ‘*’
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Statement {
+    Empty,
+    Assign {
+        vars: Vec<Var>,
+        exps: Vec<Expression>,
+    },
+    Call(FunctionCall),
+    Label(Label),
+    Break,
+    Goto(VariableId),
+    Block(Block),
+    While {
+        expr: Expression,
+        block: Block,
+    },
+    Repeat {
+        block: Block,
+        expr: Expression,
+    },
+    If {
+        expr: Expression,
+        block: Block,
+        elseif: Vec<(Expression, Block)>,
+        else_block: Option<Block>,
+    },
+    For {
+        name: VariableId,
+        initial: Expression,
+        limit: Expression,
+        step: Option<Expression>,
+        block: Block,
+    },
+    ForEach {
+        names: Vec<VariableId>,
+        exprs: Vec<Expression>,
+        block: Block,
+    },
+    Function {
+        name: FunctionName,
+        body: Function,
+    },
+    Close(VariableId),
+}
+
+/// retstat ::= return [explist] [‘;’]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ReturnStatement {
+    pub exprs: Vec<Expression>,
+}
+
+/// label ::= ‘::’ Name ‘::’
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Label {
+    pub name: VariableId,
+}
+
+/// funcname ::= Name {‘.’ Name} [‘:’ Name]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionName {
+    pub start: VariableId,
+    pub names: Vec<StringId>,
+    pub method: Option<StringId>,
+}
+
+/// varlist ::= var {‘,’ var}
+/// var ::=  Name | prefixexp ‘[’ exp ‘]’ | prefixexp ‘.’ Name
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Var {
+    Name(VariableId),
+    Index {
+        first: PrefixExpression,
+        index: Expression,
+    },
+    Dot {
+        first: PrefixExpression,
+        name: StringId,
+    },
+}
+
+// namelist ::= Name {‘,’ Name}
+// type NameList = Vec<Token>
+// (inlined where needed, no ast node exists for this)
+
+/// explist ::= exp {‘,’ exp}
+/// exp ::=  nil | false | true | Numeral | LiteralString | ‘...’ | functiondef |
+///      prefixexp | tableconstructor | exp binop exp | unop exp
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Expression {
+    Nil,
+    False,
+    True,
+    Number(NumberId),
+    String(StringId),
+    DotDotDot(VariableId),
+    Function(Function),
+    Prefix(PrefixExpression),
+    Table(FieldList),
+    Binary {
+        left: Box<Expression>,
+        op: BinaryOperator,
+        right: Box<Expression>,
+    },
+    Unary {
+        expr: Box<Expression>,
+        op: UnaryOperator,
+    },
+}
+
+/// prefixexp ::= var | functioncall | ‘(’ exp ‘)’
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PrefixExpression {
+    Var(Box<Var>),
+    Call(FunctionCall),
+    Expr(Box<Expression>),
+}
+
+/// functioncall ::=  prefixexp args | prefixexp ‘:’ Name args
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionCall {
+    pub receiver: Box<PrefixExpression>,
+    pub method_name: Option<StringId>,
+    pub args: FunctionArgs,
+}
+
+/// args ::=  ‘(’ [explist] ‘)’ | tableconstructor | LiteralString
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FunctionArgs {
+    Call { exprs: Vec<Expression> },
+    Table { table: FieldList },
+    String { value: StringId },
+}
+
+/// functiondef ::= function funcbody
+/// funcbody ::= ‘(’ [parlist] ‘)’ block end
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Function {
+    pub parameters: ParameterList,
+    pub body: Block,
+}
+
+/// parlist ::= namelist [‘,’ varargparam] | varargparam
+/// varargparam ::= ‘...’ [Name]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ParameterList {
+    pub self_var: Option<VariableId>,
+    pub names: Vec<VariableId>,
+    pub var_name: Option<VariableId>,
+}
+
+/// tableconstructor ::= ‘{’ [fieldlist] ‘}’
+/// fieldlist ::= field {fieldsep field} [fieldsep]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FieldList {
+    pub fields: Vec<Field>,
+}
+
+// field ::= ‘[’ exp ‘]’ ‘=’ exp | Name ‘=’ exp | exp
+// fieldsep ::= ‘,’ | ‘;’
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Field {
+    Index { index: Expression, expr: Expression },
+    Assign { name: StringId, expr: Expression },
+    Exp { expr: Expression },
+}
+
+/// binop ::=  ‘+’ | ‘-’ | ‘*’ | ‘/’ | ‘//’ | ‘^’ | ‘%’ |
+///      ‘&’ | ‘~’ | ‘|’ | ‘>>’ | ‘<<’ | ‘..’ |
+///      ‘<’ | ‘<=’ | ‘>’ | ‘>=’ | ‘==’ | ‘~=’ |
+///      and | or
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BinaryOperator {
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    FloorDivide,
+    Exponent,
+    Modulo,
+    BitAnd,
+    BitXor,
+    BitOr,
+    RightShift,
+    LeftShift,
+    Concat,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
+    And,
+    Or,
+}
+
+/// unop ::= ‘-’ | not | ‘#’ | ‘~’
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UnaryOperator {
+    Negate,
+    Not,
+    Hash,
+    Tilde,
+}
