@@ -1,2 +1,1 @@
-global<const> *
-local<const> a<close>, b = function(...) print"hi" end
+return nil, true

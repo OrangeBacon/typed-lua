@@ -3,7 +3,7 @@ use crate::{
     parser::lexer::{Token, TokenKind},
 };
 
-mod ast;
+pub mod ast;
 pub mod ast_print;
 mod ast_size;
 pub mod lexer;
@@ -116,7 +116,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Run the parser for a full source file and get the output tree.
-    pub fn file(&mut self) -> ast::Block<'a> {
+    pub fn file(mut self) -> ast::Block<'a> {
         let ret = self.block();
 
         if !self.check(TokenKind::Eof) {

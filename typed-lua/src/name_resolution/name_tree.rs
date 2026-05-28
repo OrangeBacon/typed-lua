@@ -22,6 +22,9 @@
 //!   are closed, as scope information from declaration is removed when the variables
 //!   are defined.
 //! - Within methods, `self` is resolved to the method that caused it to be defined.
+//! - Goto statements are linked to the labels they refer to.
+//! - Break statements are converted into goto and a label (and checked whether
+//!   the break is in a loop that can be broken out of).
 
 /// Container to associate variables and strings with a provided name tree
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -59,28 +62,31 @@ pub enum Number {
     Float(f64),
 }
 
+/// Either a local or global variable.  Var args (`...`) count as local.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Variable {
-    /// Local variables
-    Local {
-        /// Always introduced in a statement
-        line: usize,
-        name: StringId,
-        attr_close: bool,
-        attr_const: bool,
-    },
+    Local(Local),
+    Global(Global),
+}
 
-    /// Global variable
-    Global {
-        /// May be introduced at a variable read
-        line: Option<usize>,
-        name: StringId,
-        attr_const: bool,
-        // attr_close is not valid for globals
-    },
+/// Local variables
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Local {
+    /// Always introduced in a statement
+    line: usize,
+    name: StringId,
+    attr_close: bool,
+    attr_const: bool,
+}
 
-    /// Var args (`...` token)
-    VarArgs { line: usize, name: StringId },
+/// Global variable
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Global {
+    /// May be introduced at a variable read
+    line: Option<usize>,
+    name: StringId,
+    attr_const: bool,
+    // attr_close is not valid for globals
 }
 
 /// A sequence of code.  Note that block and chunk are the same in lua.  A file
@@ -120,7 +126,6 @@ pub enum Statement {
     },
     Call(FunctionCall),
     Label(Label),
-    Break,
     Goto(VariableId),
     Block(Block),
     While {
@@ -201,8 +206,7 @@ pub enum Var {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expression {
     Nil,
-    False,
-    True,
+    Bool(bool),
     Number(NumberId),
     String(StringId),
     DotDotDot(VariableId),
