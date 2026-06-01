@@ -1,23 +1,14 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::parser::{
-    ast::{
-        Attribute, AttributeNameList, BinaryOperator, Block, Expression, Field, FieldList,
-        Function, FunctionArgs, FunctionCall, FunctionName, Label, ParameterList, PrefixExpression,
-        ReturnStatement, Statement, UnaryOperator, Var, Visibility,
-    },
-    ast_size::{Size, SizeOf},
-    lexer::Token,
+use crate::{
+    parser::{ast::*, lexer::Token},
+    utils::{SizeOf, TreeCtx},
 };
 
 /// Pretty printer for all AST nodes
 pub struct AstPrint<'a, T> {
     node: &'a T,
-    top_level: bool,
-    top_size: usize,
-    prefix: String,
-    child_prefix: String,
-    name: String,
+    tree: TreeCtx,
 }
 
 impl<'a, T: SizeOf> AstPrint<'a, T> {
@@ -25,12 +16,9 @@ impl<'a, T: SizeOf> AstPrint<'a, T> {
     pub fn new(node: &'a T) -> Self {
         Self {
             node,
-            top_level: true,
-            top_size: node.size(),
-            prefix: String::new(),
-            child_prefix: String::new(),
-            name: String::new(),
+            tree: TreeCtx::new(node),
         }
+        .name("Ast")
     }
 }
 
@@ -39,11 +27,7 @@ impl<'a, T> AstPrint<'a, T> {
     fn child<U>(&self, child: &'a U) -> AstPrint<'a, U> {
         AstPrint {
             node: child,
-            top_level: false,
-            top_size: self.top_size,
-            prefix: format!("{}|- ", self.child_prefix),
-            child_prefix: format!("{}|  ", self.child_prefix),
-            name: String::new(),
+            tree: self.tree.child(),
         }
     }
 
@@ -51,34 +35,21 @@ impl<'a, T> AstPrint<'a, T> {
     fn last<U>(&self, last: &'a U) -> AstPrint<'a, U> {
         AstPrint {
             node: last,
-            top_level: false,
-            top_size: self.top_size,
-            prefix: format!("{}`- ", self.child_prefix),
-            child_prefix: format!("{}   ", self.child_prefix),
-            name: String::new(),
+            tree: self.tree.last(),
         }
     }
 
     /// Set the name of this node
-    fn name(self, name: &str) -> Self {
-        let name = if self.name.is_empty() {
-            name.to_string()
-        } else {
-            format!("{}: {name}", self.name)
-        };
-
-        Self { name, ..self }
+    fn name(mut self, name: &str) -> Self {
+        self.tree.name(name);
+        self
     }
 
     /// Swap the content without changing levels
     fn swap<U>(&self, swap: &'a U) -> AstPrint<'a, U> {
         AstPrint {
             node: swap,
-            top_level: self.top_level,
-            top_size: self.top_size,
-            prefix: self.prefix.clone(),
-            child_prefix: self.child_prefix.clone(),
-            name: self.name.clone(),
+            tree: self.tree.clone(),
         }
     }
 }
@@ -86,7 +57,7 @@ impl<'a, T> AstPrint<'a, T> {
 impl<T: SizeOf> AstPrint<'_, T> {
     /// Display the name of this node
     fn print(&self, f: &mut Formatter<'_>, name: &str) -> fmt::Result {
-        self.print_len(f, name, None)
+        self.tree.print(f, name, None, self.node)
     }
 
     /// Display the name of this node, with a node count
@@ -96,28 +67,7 @@ impl<T: SizeOf> AstPrint<'_, T> {
         name: &str,
         len: impl Into<Option<usize>>,
     ) -> fmt::Result {
-        if !self.prefix.is_empty() {
-            write!(f, "{}", self.prefix)?;
-        }
-
-        if !self.name.is_empty() {
-            write!(f, "{}: ", self.name)?;
-        }
-
-        write!(f, "{name}")?;
-
-        if let Some(len) = len.into() {
-            write!(f, "[{len}]")?;
-        }
-
-        let size = self.node.size();
-        if self.top_level || (size as f64) > (self.top_size as f64) * 0.2 {
-            write!(f, " <{}>", Size(size))?;
-        }
-
-        writeln!(f)?;
-
-        Ok(())
+        self.tree.print(f, name, len, self.node)
     }
 }
 

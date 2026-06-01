@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lexer = typed_lua::Lexer::new(&src);
     let parser = typed_lua::Parser::new(lexer);
     let ast = parser.file();
+    println!("{}", typed_lua::AstPrint::new(&ast));
     let resolver = typed_lua::Resolver::new(&ast);
     let resolved = resolver.run();
 
