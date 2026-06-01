@@ -32,8 +32,12 @@ pub struct NameContainer<T> {
     /// Root of this tree
     pub tree: T,
 
-    /// Strings used in the program, escape sequence processing, etc is already done.
+    /// Strings used in the program, known to be in utf-8 (as they were typed
+    /// in the source file).
     pub string_table: Vec<String>,
+
+    /// String literals (which may not be utf-8 due to escape sequence processing)
+    pub byte_string_table: Vec<Vec<u8>>,
 
     /// Numbers used in the program, stored as a separate table so that `Eq` works
     /// on the tree (but not this container).
@@ -44,15 +48,19 @@ pub struct NameContainer<T> {
 }
 
 /// ID of a string within the string table
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringId(pub u32);
 
+/// ID of a string within the string table
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ByteStringId(pub u32);
+
 /// ID of a number within the number table
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NumberId(pub u32);
 
 /// ID of a variable name
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VariableId(pub u32);
 
 /// Number in lua, converted from the string representation
@@ -208,7 +216,7 @@ pub enum Expression {
     Nil,
     Bool(bool),
     Number(NumberId),
-    String(StringId),
+    String(ByteStringId),
     DotDotDot(VariableId),
     Function(Function),
     Prefix(PrefixExpression),

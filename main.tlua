@@ -1,1 +1,1 @@
-return nil, true
+return "a", 'a\n\x03\0253', [=[a\n]=]

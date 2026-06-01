@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+hashbrown = { version = "0.17.1", default-features = false, features = [
+    "default-hasher",
+    "inline-more",
+] }
