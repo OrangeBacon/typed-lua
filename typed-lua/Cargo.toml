@@ -8,3 +8,4 @@ hashbrown = { version = "0.17.1", default-features = false, features = [
     "default-hasher",
     "inline-more",
 ] }
+hexf-parse = "0.2.1"

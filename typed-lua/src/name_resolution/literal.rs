@@ -5,8 +5,55 @@ use crate::{Resolver, parser::lexer::Token};
 
 impl Resolver<'_> {
     /// Convert a number token into a number literal
-    pub(super) fn number(&mut self, _tok: Token) -> nt::NumberId {
-        todo!()
+    pub(super) fn number(&mut self, tok: Token) -> nt::NumberId {
+        if tok.value.starts_with("0x") || tok.value.starts_with("0X") {
+            self.hex_number(tok.value)
+        } else {
+            self.decimal_number(tok.value)
+        }
+    }
+
+    /// Parse a hexadecimal number literal
+    fn hex_number(&mut self, num: &str) -> nt::NumberId {
+        let id = nt::NumberId(
+            self.number_table
+                .len()
+                .try_into()
+                .expect("Too many number literals within module"),
+        );
+        self.number_table.push(nt::Number::Float(1.0));
+
+        if num.contains(['.', 'p', 'P']) {
+            self.number_table.push(nt::Number::Float(hex_flt(num)));
+            id
+        } else {
+            // hex integer
+            self.number_table
+                .push(nt::Number::Integer(hex_int(&num[2..])));
+            id
+        }
+    }
+
+    /// Parse a non-hexadecimal number literal
+    fn decimal_number(&mut self, num: &str) -> nt::NumberId {
+        let id = nt::NumberId(
+            self.number_table
+                .len()
+                .try_into()
+                .expect("Too many number literals within module"),
+        );
+
+        let num = if num.contains(['.', 'e', 'E']) {
+            nt::Number::Float(num.parse::<f64>().unwrap())
+        } else {
+            match num.parse::<u64>() {
+                Ok(n) => nt::Number::Integer(n),
+                Err(_) => nt::Number::Float(num.parse::<f64>().unwrap()),
+            }
+        };
+
+        self.number_table.push(num);
+        id
     }
 
     /// Convert a string token into a string literal
@@ -21,6 +68,42 @@ impl Resolver<'_> {
 
         self.insert_byte_string(value)
     }
+}
+
+/// Parse a hexadecimal string into an integer, wrapping if too long.
+fn hex_int(s: &str) -> u64 {
+    let mut res: u64 = 0;
+
+    for ch in s.chars() {
+        let digit = match ch {
+            '0' => 0,
+            '1' => 1,
+            '2' => 2,
+            '3' => 3,
+            '4' => 4,
+            '5' => 5,
+            '6' => 6,
+            '7' => 7,
+            '8' => 8,
+            '9' => 9,
+            'a' | 'A' => 0xA,
+            'b' | 'B' => 0xB,
+            'c' | 'C' => 0xC,
+            'd' | 'D' => 0xD,
+            'e' | 'E' => 0xE,
+            'f' | 'F' => 0xF,
+            _ => panic!("Invalid hex digit"),
+        };
+        res = res.unbounded_shl(4);
+        res = res.wrapping_add(digit);
+    }
+
+    res
+}
+
+/// Parse a hexadecimal floating point literal with the 0x stripped.
+fn hex_flt(s: &str) -> f64 {
+    hexf_parse::parse_hexf64(s, false).unwrap()
 }
 
 /// Remove all valid lua quote marks from the start and end of a string literal
