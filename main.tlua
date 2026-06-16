@@ -1,1 +1,2 @@
-return "a", 'a\n\x03\0253', [=[a\n]=], 0x1.fp10
+local a = 5;
+return a;

@@ -32,12 +32,8 @@ pub struct NameContainer<T> {
     /// Root of this tree
     pub tree: T,
 
-    /// Strings used in the program, known to be in utf-8 (as they were typed
-    /// in the source file).
-    pub string_table: Vec<String>,
-
-    /// String literals (which may not be utf-8 due to escape sequence processing)
-    pub byte_string_table: Vec<Vec<u8>>,
+    /// Strings used in the program (which may not be utf-8 due to escape sequence processing)
+    pub string_table: Vec<Vec<u8>>,
 
     /// Numbers used in the program, stored as a separate table so that `Eq` works
     /// on the tree (but not this container).
@@ -50,10 +46,6 @@ pub struct NameContainer<T> {
 /// ID of a string within the string table
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringId(pub u32);
-
-/// ID of a string within the string table
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ByteStringId(pub u32);
 
 /// ID of a number within the number table
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -81,19 +73,19 @@ pub enum Variable {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Local {
     /// Always introduced in a statement
-    line: usize,
-    name: StringId,
-    attr_close: bool,
-    attr_const: bool,
+    pub line: usize,
+    pub name: StringId,
+    pub attr_close: bool,
+    pub attr_const: bool,
 }
 
 /// Global variable
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Global {
     /// May be introduced at a variable read
-    line: Option<usize>,
-    name: StringId,
-    attr_const: bool,
+    pub line: Option<usize>,
+    pub name: StringId,
+    pub attr_const: bool,
     // attr_close is not valid for globals
 }
 
@@ -166,7 +158,8 @@ pub enum Statement {
         name: FunctionName,
         body: Function,
     },
-    Close(VariableId),
+    ScopeStart(VariableId),
+    ScopeEnd(VariableId),
 }
 
 /// retstat ::= return [explist] [‘;’]
@@ -216,7 +209,7 @@ pub enum Expression {
     Nil,
     Bool(bool),
     Number(NumberId),
-    String(ByteStringId),
+    String(StringId),
     DotDotDot(VariableId),
     Function(Function),
     Prefix(PrefixExpression),

@@ -57,7 +57,7 @@ impl Resolver<'_> {
     }
 
     /// Convert a string token into a string literal
-    pub(super) fn string(&mut self, tok: Token) -> nt::ByteStringId {
+    pub(super) fn string(&mut self, tok: Token) -> nt::StringId {
         let value = string_remove_quotes(tok.value);
 
         let value = if tok.value.starts_with('[') {
@@ -66,7 +66,7 @@ impl Resolver<'_> {
             unescape_string(value)
         };
 
-        self.insert_byte_string(value)
+        self.insert_string(value)
     }
 }
 
