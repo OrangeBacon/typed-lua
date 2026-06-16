@@ -26,6 +26,8 @@
 //! - Break statements are converted into goto and a label (and checked whether
 //!   the break is in a loop that can be broken out of).
 
+use crate::parser::ast;
+
 /// Container to associate variables and strings with a provided name tree
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct NameContainer<T> {
@@ -97,6 +99,7 @@ pub struct Global {
 pub struct Block {
     pub statements: Vec<Statement>,
     pub ret_stat: Option<ReturnStatement>,
+    pub close: Vec<Statement>,
 }
 
 /// stat ::=  ‘;’ |
@@ -135,6 +138,7 @@ pub enum Statement {
     Repeat {
         block: Block,
         expr: Expression,
+        block_end: Vec<Statement>,
     },
     If {
         expr: Expression,
@@ -216,12 +220,12 @@ pub enum Expression {
     Table(FieldList),
     Binary {
         left: Box<Expression>,
-        op: BinaryOperator,
+        op: ast::BinaryOperator,
         right: Box<Expression>,
     },
     Unary {
         expr: Box<Expression>,
-        op: UnaryOperator,
+        op: ast::UnaryOperator,
     },
 }
 
@@ -280,42 +284,4 @@ pub enum Field {
     Index { index: Expression, expr: Expression },
     Assign { name: StringId, expr: Expression },
     Exp { expr: Expression },
-}
-
-/// binop ::=  ‘+’ | ‘-’ | ‘*’ | ‘/’ | ‘//’ | ‘^’ | ‘%’ |
-///      ‘&’ | ‘~’ | ‘|’ | ‘>>’ | ‘<<’ | ‘..’ |
-///      ‘<’ | ‘<=’ | ‘>’ | ‘>=’ | ‘==’ | ‘~=’ |
-///      and | or
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BinaryOperator {
-    Plus,
-    Minus,
-    Multiply,
-    Divide,
-    FloorDivide,
-    Exponent,
-    Modulo,
-    BitAnd,
-    BitXor,
-    BitOr,
-    RightShift,
-    LeftShift,
-    Concat,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Equal,
-    NotEqual,
-    And,
-    Or,
-}
-
-/// unop ::= ‘-’ | not | ‘#’ | ‘~’
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum UnaryOperator {
-    Negate,
-    Not,
-    Hash,
-    Tilde,
 }

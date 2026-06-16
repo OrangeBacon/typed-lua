@@ -64,11 +64,13 @@ impl<'a> Resolver<'a> {
         }
         let ret_stat = block.ret_stat.as_ref().map(|s| self.ret_stat(s));
 
-        self.scope_leave();
+        let mut close = vec![];
+        self.scope_leave(&mut close);
 
         nt::Block {
             statements,
             ret_stat,
+            close,
         }
     }
 
@@ -76,20 +78,34 @@ impl<'a> Resolver<'a> {
     fn statement(&mut self, s: &ast::Statement, out: &mut Vec<nt::Statement>) {
         match s {
             ast::Statement::Empty => out.push(nt::Statement::Empty),
-            ast::Statement::Assign { vars, exps } => todo!(),
-            ast::Statement::Call(function_call) => todo!(),
+            ast::Statement::Assign { vars, exps } => out.push(nt::Statement::Assign {
+                vars: vars.iter().map(|v| self.var(v)).collect(),
+                exps: exps.iter().map(|e| self.expr(e)).collect(),
+            }),
+            ast::Statement::Call(call) => out.push(nt::Statement::Call(self.call(call))),
             ast::Statement::Label(label) => todo!(),
             ast::Statement::Break => todo!(),
             ast::Statement::Goto(token) => todo!(),
-            ast::Statement::Block(block) => todo!(),
-            ast::Statement::While { expr, block } => todo!(),
-            ast::Statement::Repeat { block, expr } => todo!(),
+            ast::Statement::Block(block) => out.push(nt::Statement::Block(self.block(block))),
+            ast::Statement::While { expr, block } => out.push(nt::Statement::While {
+                expr: self.expr(expr),
+                block: self.block(block),
+            }),
+            ast::Statement::Repeat { block, expr } => out.push(self.repeat(block, expr)),
             ast::Statement::If {
                 expr,
                 block,
                 elseif,
                 else_block,
-            } => todo!(),
+            } => out.push(nt::Statement::If {
+                expr: self.expr(expr),
+                block: self.block(block),
+                elseif: elseif
+                    .iter()
+                    .map(|(expr, block)| (self.expr(expr), self.block(block)))
+                    .collect(),
+                else_block: else_block.as_ref().map(|b| self.block(b)),
+            }),
             ast::Statement::For {
                 name,
                 initial,
@@ -105,6 +121,36 @@ impl<'a> Resolver<'a> {
             ast::Statement::Function { name, body, vis } => todo!(),
             ast::Statement::Declare { vis, names, exprs } => self.declare(*vis, names, exprs, out),
             ast::Statement::GlobalCollective { attrib } => todo!(),
+        }
+    }
+
+    /// Resolve a repeat statement
+    fn repeat(&mut self, block: &ast::Block, expr: &ast::Expression) -> nt::Statement {
+        // this is not using the normal `self.block` method as we need to extend
+        // the scope of the repeat block into the controlling expression after
+        // the block finishes.  `repeat local a = 5 until a < 3` should be valid.
+
+        self.scope_enter();
+
+        let mut statements = Vec::with_capacity(block.statements.len());
+        for s in &block.statements {
+            self.statement(s, &mut statements);
+        }
+        let ret_stat = block.ret_stat.as_ref().map(|s| self.ret_stat(s));
+
+        let expr = self.expr(expr);
+
+        let mut leave = vec![];
+        self.scope_leave(&mut leave);
+
+        nt::Statement::Repeat {
+            block: nt::Block {
+                statements,
+                ret_stat,
+                close: vec![],
+            },
+            expr,
+            block_end: leave,
         }
     }
 
@@ -125,6 +171,7 @@ impl<'a> Resolver<'a> {
     ) {
         match vis {
             ast::Visibility::Local => {
+                // TODO: Make this a lot better
                 let value = self.expr(&exprs[0]);
 
                 let name = names.names[0].0;
@@ -165,12 +212,21 @@ impl<'a> Resolver<'a> {
             ast::Expression::True => nt::Expression::Bool(true),
             ast::Expression::Number(tok) => nt::Expression::Number(self.number(*tok)),
             ast::Expression::String(tok) => nt::Expression::String(self.string(*tok)),
-            ast::Expression::DotDotDot => todo!(),
+            ast::Expression::DotDotDot => nt::Expression::DotDotDot(self.resolve("...")),
             ast::Expression::Function(function) => todo!(),
             ast::Expression::Prefix(pre) => nt::Expression::Prefix(self.prefix(pre)),
-            ast::Expression::Table(field_list) => todo!(),
-            ast::Expression::Binary { left, op, right } => todo!(),
-            ast::Expression::Unary { expr, op } => todo!(),
+            ast::Expression::Table(field_list) => {
+                nt::Expression::Table(self.field_list(field_list))
+            }
+            ast::Expression::Binary { left, op, right } => nt::Expression::Binary {
+                left: Box::new(self.expr(left)),
+                op: *op,
+                right: Box::new(self.expr(right)),
+            },
+            ast::Expression::Unary { expr, op } => nt::Expression::Unary {
+                expr: Box::new(self.expr(expr)),
+                op: *op,
+            },
         }
     }
 
@@ -178,8 +234,36 @@ impl<'a> Resolver<'a> {
     fn prefix(&mut self, pre: &ast::PrefixExpression) -> nt::PrefixExpression {
         match pre {
             ast::PrefixExpression::Var(var) => nt::PrefixExpression::Var(Box::new(self.var(var))),
-            ast::PrefixExpression::Call(function_call) => todo!(),
-            ast::PrefixExpression::Expr(expression) => todo!(),
+            ast::PrefixExpression::Call(call) => nt::PrefixExpression::Call(self.call(call)),
+            ast::PrefixExpression::Expr(expression) => {
+                nt::PrefixExpression::Expr(Box::new(self.expr(expression)))
+            }
+        }
+    }
+
+    /// Resolve a function call
+    fn call(&mut self, call: &ast::FunctionCall) -> nt::FunctionCall {
+        nt::FunctionCall {
+            receiver: Box::new(self.prefix(&call.receiver)),
+            method_name: call
+                .method_name
+                .map(|n| self.insert_string(n.value.as_bytes())),
+            args: self.args(&call.args),
+        }
+    }
+
+    /// Resolve function arguments
+    fn args(&mut self, args: &ast::FunctionArgs) -> nt::FunctionArgs {
+        match args {
+            ast::FunctionArgs::Call { exprs } => nt::FunctionArgs::Call {
+                exprs: exprs.iter().map(|e| self.expr(e)).collect(),
+            },
+            ast::FunctionArgs::Table { table } => nt::FunctionArgs::Table {
+                table: self.field_list(table),
+            },
+            ast::FunctionArgs::String { value } => nt::FunctionArgs::String {
+                value: self.insert_string(value.value.as_bytes()),
+            },
         }
     }
 
@@ -187,8 +271,37 @@ impl<'a> Resolver<'a> {
     fn var(&mut self, var: &ast::Var) -> nt::Var {
         match var {
             ast::Var::Name(token) => nt::Var::Name(self.resolve(token.value)),
-            ast::Var::Index { first, index } => todo!(),
-            ast::Var::Dot { first, name } => todo!(),
+            ast::Var::Index { first, index } => nt::Var::Index {
+                first: self.prefix(first),
+                index: self.expr(index),
+            },
+            ast::Var::Dot { first, name } => nt::Var::Dot {
+                first: self.prefix(first),
+                name: self.insert_string(name.value.as_bytes()),
+            },
+        }
+    }
+
+    /// Resolve a table constructor
+    fn field_list(&mut self, fields: &ast::FieldList) -> nt::FieldList {
+        nt::FieldList {
+            fields: fields
+                .fields
+                .iter()
+                .map(|f| match f {
+                    ast::Field::Index { index, expr } => nt::Field::Index {
+                        index: self.expr(index),
+                        expr: self.expr(expr),
+                    },
+                    ast::Field::Assign { name, expr } => nt::Field::Assign {
+                        name: self.insert_string(name.value.as_bytes()),
+                        expr: self.expr(expr),
+                    },
+                    ast::Field::Exp { expr } => nt::Field::Exp {
+                        expr: self.expr(expr),
+                    },
+                })
+                .collect(),
         }
     }
 
@@ -217,12 +330,15 @@ impl<'a> Resolver<'a> {
     }
 
     /// Leave a lexical scope
-    fn scope_leave(&mut self) {
+    fn scope_leave(&mut self, out: &mut Vec<nt::Statement>) {
         self.scope_depth -= 1;
 
         while let Some(last) = self.locals.last() {
             if last.depth > self.scope_depth {
+                out.push(nt::Statement::ScopeEnd(last.var));
                 self.locals.pop();
+            } else {
+                break;
             }
         }
     }

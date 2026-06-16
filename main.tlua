@@ -1,2 +1,4 @@
-local a = 5;
-return a;
+local x = 3
+do
+    local x = x
+end
