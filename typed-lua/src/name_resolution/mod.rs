@@ -19,15 +19,16 @@ pub struct Resolver<'a> {
     number_table: Vec<nt::Number>,
 
     variable_table: Vec<nt::Variable>,
-    locals: Vec<Local>,
+    locals: Vec<Variable>,
+    globals: HashMap<nt::StringId, nt::VariableId>,
     scope_depth: usize,
 }
 
 /// All state for variable resolution
 #[derive(Debug, Clone)]
-struct Local {
-    depth: usize,
-    var: nt::VariableId,
+enum Variable {
+    Var { depth: usize, id: nt::VariableId },
+    Collective { depth: usize, attr_const: bool },
 }
 
 impl<'a> Resolver<'a> {
@@ -40,6 +41,7 @@ impl<'a> Resolver<'a> {
             number_table: vec![],
             variable_table: vec![],
             locals: vec![],
+            globals: HashMap::new(),
             scope_depth: 0,
         }
     }
@@ -190,9 +192,9 @@ impl<'a> Resolver<'a> {
                     attr_const: false,
                 }));
 
-                self.locals.push(Local {
+                self.locals.push(Variable::Var {
                     depth: self.scope_depth,
-                    var,
+                    id: var,
                 });
                 out.push(nt::Statement::ScopeStart(var));
                 out.push(nt::Statement::Assign {
@@ -307,21 +309,90 @@ impl<'a> Resolver<'a> {
 
     /// Get a variable id for a variable name
     fn resolve(&mut self, name: &str) -> nt::VariableId {
+        #[derive(PartialEq)]
+        enum ResolveState {
+            Global,
+            Collective,
+            CollectiveConst,
+            None,
+        }
+
         let s = self.insert_string(name.as_bytes());
 
+        let mut state = ResolveState::None;
+
+        // iterate through a stack, top first (fifo)
         for l in self.locals.iter().rev() {
-            let id = l.var;
-            let var = &self.variable_table[id.0 as usize];
-            let name = match var {
-                name_tree::Variable::Local(local) => local.name,
-                name_tree::Variable::Global(global) => global.name,
-            };
-            if name == s {
-                return id;
+            match l {
+                Variable::Var { id, .. } => {
+                    let var = &self.variable_table[id.0 as usize];
+                    if state == ResolveState::None && matches!(var, nt::Variable::Global(_)) {
+                        state = ResolveState::Global;
+                    }
+
+                    let name = match var {
+                        nt::Variable::Local(local) => local.name,
+                        nt::Variable::Global(global) => global.name,
+                    };
+                    if name == s {
+                        return *id;
+                    }
+                }
+                Variable::Collective { attr_const, .. } => {
+                    // found a `global *`
+                    if state != ResolveState::None {
+                        continue;
+                    }
+                    if *attr_const {
+                        state = ResolveState::CollectiveConst
+                    } else {
+                        state = ResolveState::Collective
+                    }
+                }
             }
         }
 
-        todo!()
+        // did not find anything already declared, so work out what to do now
+        let attr_const = match state {
+            ResolveState::Global => {
+                // found a `global var_name` declaration first, so error on undef
+                panic!("Undefined variable: `{name}`")
+            }
+            ResolveState::None | ResolveState::Collective => false,
+            ResolveState::CollectiveConst => true,
+        };
+
+        // try to find a global, if not, create one with the given `const` attr
+        if let Some(&g) = self.globals.get(&s) {
+            return g;
+        }
+
+        let var = nt::VariableId(
+            self.variable_table
+                .len()
+                .try_into()
+                .expect("Too many variables within module"),
+        );
+
+        // This code creates the global within the `if false`, where is is
+        // mutable, so its use outside of the never-executed code still believes
+        // it is mutable, as mutability is a property of the global, rather than
+        // something that is lexically scoped.  This is considered to be intentional,
+        // although we should probably provide a warning somehow? warnings are
+        // not at all a priority yet.
+        // ```lua
+        // global<const>*
+        // if false then global a = 5 end
+        // a = 6 -- a isn't constant here, due to the previous global declaration
+        // ```
+        self.variable_table.push(nt::Variable::Global(nt::Global {
+            line: None,
+            name: s,
+            attr_const,
+        }));
+
+        self.globals.insert(s, var);
+        var
     }
 
     /// Enter a lexical scope
@@ -334,8 +405,18 @@ impl<'a> Resolver<'a> {
         self.scope_depth -= 1;
 
         while let Some(last) = self.locals.last() {
-            if last.depth > self.scope_depth {
-                out.push(nt::Statement::ScopeEnd(last.var));
+            let depth = match last {
+                Variable::Var { depth, .. } => *depth,
+                Variable::Collective { depth, .. } => *depth,
+            };
+
+            if depth > self.scope_depth {
+                if let Variable::Var { id: var, .. } = last
+                    && matches!(self.variable_table[var.0 as usize], nt::Variable::Local(_))
+                {
+                    out.push(nt::Statement::ScopeEnd(*var));
+                }
+
                 self.locals.pop();
             } else {
                 break;

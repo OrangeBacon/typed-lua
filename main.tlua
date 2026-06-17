@@ -1,4 +1,2 @@
-local x = 3
-do
-    local x = x
-end
+a = 3
+print(a)
