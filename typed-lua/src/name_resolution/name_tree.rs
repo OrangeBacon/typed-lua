@@ -74,8 +74,7 @@ pub enum Variable {
 /// Local variables
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Local {
-    /// Always introduced in a statement
-    pub line: usize,
+    pub line: Option<usize>,
     pub name: StringId,
     pub attr_close: bool,
     pub attr_const: bool,

@@ -22,13 +22,30 @@ pub struct Resolver<'a> {
     locals: Vec<Variable>,
     globals: HashMap<nt::StringId, nt::VariableId>,
     scope_depth: usize,
+    function_depth: usize,
 }
 
 /// All state for variable resolution
 #[derive(Debug, Clone)]
 enum Variable {
-    Var { depth: usize, id: nt::VariableId },
-    Collective { depth: usize, attr_const: bool },
+    Var {
+        depth: usize,
+        id: nt::VariableId,
+        // if the variable is limited to being used in a specified function and should
+        // not be resolved in a deeper function
+        func_depth: Option<usize>,
+    },
+    Collective {
+        depth: usize,
+        attr_const: bool,
+    },
+    /// Refer to an existing variable with a different name.  Note that this is
+    /// only referencing a variable, alias -> alias is not supported.
+    Alias {
+        depth: usize,
+        name: nt::StringId,
+        id: nt::VariableId,
+    },
 }
 
 impl<'a> Resolver<'a> {
@@ -43,6 +60,7 @@ impl<'a> Resolver<'a> {
             locals: vec![],
             globals: HashMap::new(),
             scope_depth: 0,
+            function_depth: 0,
         }
     }
 
@@ -213,7 +231,7 @@ impl<'a> Resolver<'a> {
         );
         let s = self.insert_string(name.value.as_bytes());
         self.variable_table.push(nt::Variable::Local(nt::Local {
-            line: name.line,
+            line: Some(name.line),
             name: s,
             attr_close: false,
             attr_const: true,
@@ -221,6 +239,7 @@ impl<'a> Resolver<'a> {
         self.locals.push(Variable::Var {
             depth: self.scope_depth,
             id: var,
+            func_depth: None,
         });
 
         let block = self.block(block);
@@ -260,7 +279,7 @@ impl<'a> Resolver<'a> {
                 );
                 let s = self.insert_string(name.value.as_bytes());
                 self.variable_table.push(nt::Variable::Local(nt::Local {
-                    line: name.line,
+                    line: Some(name.line),
                     name: s,
                     attr_close: false,
                     attr_const: idx == 0,
@@ -268,6 +287,7 @@ impl<'a> Resolver<'a> {
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
+                    func_depth: None,
                 });
                 var
             })
@@ -359,7 +379,7 @@ impl<'a> Resolver<'a> {
                         .expect("Too many variables within module"),
                 );
                 self.variable_table.push(nt::Variable::Local(nt::Local {
-                    line: name.line,
+                    line: Some(name.line),
                     name: s,
                     attr_close: is_close,
                     attr_const: is_const,
@@ -368,6 +388,7 @@ impl<'a> Resolver<'a> {
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
+                    func_depth: None,
                 });
                 out.push(nt::Statement::ScopeStart(var));
                 nt::Var::Name(var)
@@ -438,6 +459,7 @@ impl<'a> Resolver<'a> {
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
+                    func_depth: None,
                 });
                 nt::Var::Name(var)
             })
@@ -460,7 +482,9 @@ impl<'a> Resolver<'a> {
             ast::Expression::Number(tok) => nt::Expression::Number(self.number(*tok)),
             ast::Expression::String(tok) => nt::Expression::String(self.string(*tok)),
             ast::Expression::DotDotDot => nt::Expression::DotDotDot(self.resolve("...")),
-            ast::Expression::Function(function) => todo!(),
+            ast::Expression::Function(function) => {
+                nt::Expression::Function(self.function(function))
+            }
             ast::Expression::Prefix(pre) => nt::Expression::Prefix(self.prefix(pre)),
             ast::Expression::Table(field_list) => {
                 nt::Expression::Table(self.field_list(field_list))
@@ -475,6 +499,90 @@ impl<'a> Resolver<'a> {
                 op: *op,
             },
         }
+    }
+
+    /// Resolve a function expression (lambda)
+    fn function(&mut self, function: &ast::Function) -> nt::Function {
+        self.scope_enter();
+        self.function_depth += 1;
+
+        let names = function
+            .parameters
+            .names
+            .iter()
+            .map(|name| {
+                let var = nt::VariableId(
+                    self.variable_table
+                        .len()
+                        .try_into()
+                        .expect("Too many variables within module"),
+                );
+                let s = self.insert_string(name.value.as_bytes());
+                self.variable_table.push(nt::Variable::Local(nt::Local {
+                    line: Some(name.line),
+                    name: s,
+                    attr_close: false,
+                    attr_const: false,
+                }));
+                self.locals.push(Variable::Var {
+                    depth: self.scope_depth,
+                    id: var,
+                    func_depth: None,
+                });
+                var
+            })
+            .collect();
+
+        let var_name = function.parameters.var_name.map(|var_arg| {
+            // we have a variadic argument, so create its `...` variable
+            let var = nt::VariableId(
+                self.variable_table
+                    .len()
+                    .try_into()
+                    .expect("Too many variables within module"),
+            );
+            let s = self.insert_string(b"...");
+            self.variable_table.push(nt::Variable::Local(nt::Local {
+                line: None,
+                name: s,
+                attr_close: false,
+                attr_const: false,
+            }));
+            self.locals.push(Variable::Var {
+                depth: self.scope_depth,
+                id: var,
+                // `...` is only available directly inside a variadic function
+                // which implies it cannot be resolved from a deeper function
+                func_depth: Some(self.function_depth),
+            });
+
+            if let Some(name) = var_arg {
+                // named var arg, also allow accessing the SAME variable through
+                // a different name
+
+                let s = self.insert_string(name.value.as_bytes());
+                self.locals.push(Variable::Alias {
+                    depth: self.scope_depth,
+                    id: var,
+                    name: s,
+                });
+            }
+            var
+        });
+
+        let parameters = nt::ParameterList {
+            self_var: None,
+            names,
+            var_name,
+        };
+
+        let body = self.block(&function.body);
+
+        // only contains function parameters which cant be <close>
+        self.scope_leave(&mut vec![]);
+        self.function_depth -= 1;
+
+        nt::Function { parameters, body }
     }
 
     /// Resolve a prefix expression
@@ -569,7 +677,7 @@ impl<'a> Resolver<'a> {
         // iterate through a stack, top first (fifo)
         for l in self.locals.iter().rev() {
             match l {
-                Variable::Var { id, .. } => {
+                Variable::Var { id, func_depth, .. } => {
                     let var = &self.variable_table[id.0 as usize];
                     if state == ResolveState::None && matches!(var, nt::Variable::Global(_)) {
                         state = ResolveState::Global;
@@ -579,7 +687,9 @@ impl<'a> Resolver<'a> {
                         nt::Variable::Local(local) => local.name,
                         nt::Variable::Global(global) => global.name,
                     };
-                    if name == s {
+                    if name == s
+                        && (func_depth.is_none() || *func_depth == Some(self.function_depth))
+                    {
                         return *id;
                     }
                 }
@@ -592,6 +702,16 @@ impl<'a> Resolver<'a> {
                         state = ResolveState::CollectiveConst
                     } else {
                         state = ResolveState::Collective
+                    }
+                }
+                Variable::Alias { name, id, .. } => {
+                    let var = &self.variable_table[id.0 as usize];
+                    if state == ResolveState::None && matches!(var, nt::Variable::Global(_)) {
+                        state = ResolveState::Global;
+                    }
+
+                    if *name == s {
+                        return *id;
                     }
                 }
             }
@@ -653,6 +773,7 @@ impl<'a> Resolver<'a> {
             let depth = match last {
                 Variable::Var { depth, .. } => *depth,
                 Variable::Collective { depth, .. } => *depth,
+                Variable::Alias { depth, .. } => *depth,
             };
 
             if depth > self.scope_depth {
