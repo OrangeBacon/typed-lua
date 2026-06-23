@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::parser::ast;
+use crate::parser::{ast, lexer::Token};
 
 mod literal;
 mod name_tree;
@@ -114,12 +114,12 @@ impl<'a> Resolver<'a> {
                 limit,
                 step,
                 block,
-            } => todo!(),
+            } => out.push(self.for_loop(*name, initial, limit, step.as_ref(), block)),
             ast::Statement::ForEach {
                 names,
                 exprs,
                 block,
-            } => todo!(),
+            } => out.push(self.for_each(names, exprs, &block)),
             ast::Statement::Function { name, body, vis } => todo!(),
             ast::Statement::Declare { vis, names, exprs } => self.declare(*vis, names, exprs, out),
             ast::Statement::GlobalCollective { attrib } => {
@@ -165,6 +165,101 @@ impl<'a> Resolver<'a> {
             },
             expr,
             block_end: leave,
+        }
+    }
+
+    /// Resolve a for loop
+    fn for_loop(
+        &mut self,
+        name: Token,
+        initial: &ast::Expression,
+        limit: &ast::Expression,
+        step: Option<&ast::Expression>,
+        block: &ast::Block,
+    ) -> nt::Statement {
+        let initial = self.expr(initial);
+        let limit = self.expr(limit);
+        let step = step.map(|s| self.expr(s));
+
+        self.scope_enter();
+
+        let var = nt::VariableId(
+            self.variable_table
+                .len()
+                .try_into()
+                .expect("Too many variables within module"),
+        );
+        let s = self.insert_string(name.value.as_bytes());
+        self.variable_table.push(nt::Variable::Local(nt::Local {
+            line: name.line,
+            name: s,
+            attr_close: false,
+            attr_const: true,
+        }));
+        self.locals.push(Variable::Var {
+            depth: self.scope_depth,
+            id: var,
+        });
+
+        let block = self.block(block);
+
+        // leave will only close the loop variable which isn't close
+        self.scope_leave(&mut vec![]);
+
+        nt::Statement::For {
+            name: var,
+            initial,
+            limit,
+            step,
+            block,
+        }
+    }
+
+    /// Resolve a for each loop
+    fn for_each(
+        &mut self,
+        names: &[Token],
+        exprs: &[ast::Expression],
+        block: &ast::Block,
+    ) -> nt::Statement {
+        let exprs = exprs.iter().map(|e| self.expr(e)).collect();
+
+        self.scope_enter();
+
+        let names = names
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| {
+                let var = nt::VariableId(
+                    self.variable_table
+                        .len()
+                        .try_into()
+                        .expect("Too many variables within module"),
+                );
+                let s = self.insert_string(name.value.as_bytes());
+                self.variable_table.push(nt::Variable::Local(nt::Local {
+                    line: name.line,
+                    name: s,
+                    attr_close: false,
+                    attr_const: idx == 0,
+                }));
+                self.locals.push(Variable::Var {
+                    depth: self.scope_depth,
+                    id: var,
+                });
+                var
+            })
+            .collect();
+
+        let block = self.block(block);
+
+        // leave will only close the loop variable which isn't close
+        self.scope_leave(&mut vec![]);
+
+        nt::Statement::ForEach {
+            names,
+            exprs,
+            block,
         }
     }
 
