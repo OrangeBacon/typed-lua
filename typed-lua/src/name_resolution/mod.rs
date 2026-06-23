@@ -80,10 +80,7 @@ impl<'a> Resolver<'a> {
     fn statement(&mut self, s: &ast::Statement, out: &mut Vec<nt::Statement>) {
         match s {
             ast::Statement::Empty => out.push(nt::Statement::Empty),
-            ast::Statement::Assign { vars, exps } => out.push(nt::Statement::Assign {
-                vars: vars.iter().map(|v| self.var(v)).collect(),
-                exps: exps.iter().map(|e| self.expr(e)).collect(),
-            }),
+            ast::Statement::Assign { vars, exps } => out.push(self.assign(vars, exps)),
             ast::Statement::Call(call) => out.push(nt::Statement::Call(self.call(call))),
             ast::Statement::Label(label) => todo!(),
             ast::Statement::Break => todo!(),
@@ -135,6 +132,31 @@ impl<'a> Resolver<'a> {
                     attr_const,
                 });
             }
+        }
+    }
+
+    /// Resolve an assignment
+    fn assign(&mut self, vars: &[ast::Var], exps: &[ast::Expression]) -> nt::Statement {
+        let vars = vars
+            .iter()
+            .map(|v| {
+                if let ast::Var::Name(tok) = v {
+                    let var = self.resolve(tok.value);
+                    let var = &self.variable_table[var.0 as usize];
+                    let is_const = match var {
+                        name_tree::Variable::Local(local) => local.attr_const,
+                        name_tree::Variable::Global(global) => global.attr_const,
+                    };
+                    if is_const {
+                        panic!("Attempt to assign to const variable `{}`", tok.value);
+                    }
+                }
+                self.var(v)
+            })
+            .collect();
+        nt::Statement::Assign {
+            vars,
+            exps: exps.iter().map(|e| self.expr(e)).collect(),
         }
     }
 
@@ -352,10 +374,12 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
-        out.push(nt::Statement::Assign {
-            vars: names,
-            exps: values,
-        });
+        if !exprs.is_empty() {
+            out.push(nt::Statement::Assign {
+                vars: names,
+                exps: values,
+            });
+        }
     }
 
     /// Resolve a global variable declaration
@@ -419,10 +443,12 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
-        out.push(nt::Statement::Assign {
-            vars: names,
-            exps: values,
-        });
+        if !exprs.is_empty() {
+            out.push(nt::Statement::Assign {
+                vars: names,
+                exps: values,
+            });
+        }
     }
 
     /// Resolve an expression
