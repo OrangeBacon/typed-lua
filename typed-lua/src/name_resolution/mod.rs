@@ -122,7 +122,19 @@ impl<'a> Resolver<'a> {
             } => todo!(),
             ast::Statement::Function { name, body, vis } => todo!(),
             ast::Statement::Declare { vis, names, exprs } => self.declare(*vis, names, exprs, out),
-            ast::Statement::GlobalCollective { attrib } => todo!(),
+            ast::Statement::GlobalCollective { attrib } => {
+                if let Some(attr) = attrib
+                    && attr.name.value != "const"
+                {
+                    panic!("Unknown attribute: {}", attr.name.value);
+                }
+
+                let attr_const = attrib.is_some();
+                self.locals.push(Variable::Collective {
+                    depth: self.scope_depth,
+                    attr_const,
+                });
+            }
         }
     }
 
@@ -172,12 +184,56 @@ impl<'a> Resolver<'a> {
         out: &mut Vec<nt::Statement>,
     ) {
         match vis {
-            ast::Visibility::Local => {
-                // TODO: Make this a lot better
-                let value = self.expr(&exprs[0]);
+            ast::Visibility::Local => self.declare_local(names, exprs, out),
+            ast::Visibility::Global => self.declare_global(names, exprs, out),
+        }
+    }
 
-                let name = names.names[0].0;
+    /// Resolve a local variable declaration
+    fn declare_local(
+        &mut self,
+        names: &ast::AttributeNameList,
+        exprs: &[ast::Expression],
+        out: &mut Vec<nt::Statement>,
+    ) {
+        let values = exprs.iter().map(|e| self.expr(e)).collect();
+
+        let mut all_const = false;
+        let mut all_close = false;
+
+        if let Some(all) = &names.attrib {
+            let name = all.name.value;
+            if name == "const" {
+                all_const = true;
+            } else if name == "close" {
+                all_close = true;
+                if names.names.len() > 1 {
+                    panic!("The `close` attribute can only be applied to one variable at a time");
+                }
+            } else {
+                panic!("Unknown attribute: {name}");
+            }
+        }
+
+        let names = names
+            .names
+            .iter()
+            .map(|(name, attr)| {
                 let s = self.insert_string(name.value.as_bytes());
+
+                let mut is_close = all_close;
+                let mut is_const = all_const;
+
+                if let Some(attr) = attr {
+                    let name = attr.name.value;
+                    if name == "const" {
+                        is_const = true;
+                    } else if name == "close" {
+                        is_close = true;
+                    } else {
+                        panic!("Unknown attribute: {name}");
+                    }
+                }
 
                 let var = nt::VariableId(
                     self.variable_table
@@ -188,8 +244,8 @@ impl<'a> Resolver<'a> {
                 self.variable_table.push(nt::Variable::Local(nt::Local {
                     line: name.line,
                     name: s,
-                    attr_close: false,
-                    attr_const: false,
+                    attr_close: is_close,
+                    attr_const: is_const,
                 }));
 
                 self.locals.push(Variable::Var {
@@ -197,13 +253,81 @@ impl<'a> Resolver<'a> {
                     id: var,
                 });
                 out.push(nt::Statement::ScopeStart(var));
-                out.push(nt::Statement::Assign {
-                    vars: vec![nt::Var::Name(var)],
-                    exps: vec![value],
-                });
+                nt::Var::Name(var)
+            })
+            .collect();
+
+        out.push(nt::Statement::Assign {
+            vars: names,
+            exps: values,
+        });
+    }
+
+    /// Resolve a global variable declaration
+    fn declare_global(
+        &mut self,
+        names: &ast::AttributeNameList,
+        exprs: &[ast::Expression],
+        out: &mut Vec<nt::Statement>,
+    ) {
+        let values = exprs.iter().map(|e| self.expr(e)).collect();
+
+        let mut all_const = false;
+
+        if let Some(all) = &names.attrib {
+            let name = all.name.value;
+            if name == "const" {
+                all_const = true;
+            } else if name == "close" {
+                panic!("The `close` attribute can only be applied to local variables");
+            } else {
+                panic!("Unknown attribute: {name}");
             }
-            ast::Visibility::Global => todo!(),
         }
+
+        let names = names
+            .names
+            .iter()
+            .map(|(name, attr)| {
+                let s = self.insert_string(name.value.as_bytes());
+
+                let mut is_const = all_const;
+
+                if let Some(attr) = attr {
+                    let name = attr.name.value;
+                    if name == "const" {
+                        is_const = true;
+                    } else if name == "close" {
+                        panic!("The `close` attribute can only be applied to local variables");
+                    } else {
+                        panic!("Unknown attribute: {name}");
+                    }
+                }
+
+                let var = nt::VariableId(
+                    self.variable_table
+                        .len()
+                        .try_into()
+                        .expect("Too many variables within module"),
+                );
+                self.variable_table.push(nt::Variable::Global(nt::Global {
+                    line: Some(name.line),
+                    name: s,
+                    attr_const: is_const,
+                }));
+
+                self.locals.push(Variable::Var {
+                    depth: self.scope_depth,
+                    id: var,
+                });
+                nt::Var::Name(var)
+            })
+            .collect();
+
+        out.push(nt::Statement::Assign {
+            vars: names,
+            exps: values,
+        });
     }
 
     /// Resolve an expression
