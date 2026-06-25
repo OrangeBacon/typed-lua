@@ -1,1 +1,2 @@
-return function(...b) print(b, ...) end
+global print
+global function a() print() end

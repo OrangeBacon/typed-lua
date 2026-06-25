@@ -432,6 +432,10 @@ impl<'a> Parser<'a> {
         let mut names = vec![];
         let mut var_name = None;
 
+        if self.current.kind == TokenKind::RightParen {
+            return ast::ParameterList { names, var_name };
+        }
+
         loop {
             if self.check(TokenKind::DotDotDot) {
                 var_name = Some(if self.check(TokenKind::Name) {

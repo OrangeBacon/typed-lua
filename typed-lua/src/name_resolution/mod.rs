@@ -134,8 +134,10 @@ impl<'a> Resolver<'a> {
                 names,
                 exprs,
                 block,
-            } => out.push(self.for_each(names, exprs, &block)),
-            ast::Statement::Function { name, body, vis } => todo!(),
+            } => out.push(self.for_each(names, exprs, block)),
+            ast::Statement::Function { name, body, vis } => {
+                out.push(self.function_statement(name, body, *vis))
+            }
             ast::Statement::Declare { vis, names, exprs } => self.declare(*vis, names, exprs, out),
             ast::Statement::GlobalCollective { attrib } => {
                 if let Some(attr) = attrib
@@ -155,6 +157,8 @@ impl<'a> Resolver<'a> {
 
     /// Resolve an assignment
     fn assign(&mut self, vars: &[ast::Var], exps: &[ast::Expression]) -> nt::Statement {
+        let exps = exps.iter().map(|e| self.expr(e)).collect();
+
         let vars = vars
             .iter()
             .map(|v| {
@@ -174,7 +178,8 @@ impl<'a> Resolver<'a> {
             .collect();
         nt::Statement::Assign {
             vars,
-            exps: exps.iter().map(|e| self.expr(e)).collect(),
+            exps,
+            is_global_init: false,
         }
     }
 
@@ -305,6 +310,99 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// Resolve a function definition statement
+    fn function_statement(
+        &mut self,
+        name: &ast::FunctionName,
+        body: &ast::Function,
+        vis: Option<ast::Visibility>,
+    ) -> nt::Statement {
+        let name = match vis {
+            Some(ast::Visibility::Local) => {
+                if name.method.is_some() {
+                    panic!("No method name allowed in local function statement")
+                }
+                let [name] = name.names.as_slice() else {
+                    panic!("Only 1 name component allowed in local function statement")
+                };
+
+                let var = nt::VariableId(
+                    self.variable_table
+                        .len()
+                        .try_into()
+                        .expect("Too many variables within module"),
+                );
+                let s = self.insert_string(name.value.as_bytes());
+                self.variable_table.push(nt::Variable::Local(nt::Local {
+                    line: Some(name.line),
+                    name: s,
+                    attr_close: false,
+                    attr_const: false,
+                }));
+
+                self.locals.push(Variable::Var {
+                    depth: self.scope_depth,
+                    id: var,
+                    func_depth: None,
+                });
+                nt::FunctionName::Define { var }
+            }
+            Some(ast::Visibility::Global) => {
+                if name.method.is_some() {
+                    panic!("No method name allowed in global function statement")
+                }
+                let [name] = name.names.as_slice() else {
+                    panic!("Only 1 name component allowed in global function statement")
+                };
+
+                let var = nt::VariableId(
+                    self.variable_table
+                        .len()
+                        .try_into()
+                        .expect("Too many variables within module"),
+                );
+                let s = self.insert_string(name.value.as_bytes());
+                self.variable_table.push(nt::Variable::Global(nt::Global {
+                    line: Some(name.line),
+                    name: s,
+                    attr_const: false,
+                }));
+
+                self.locals.push(Variable::Var {
+                    depth: self.scope_depth,
+                    id: var,
+                    func_depth: None,
+                });
+
+                nt::FunctionName::Define { var }
+            }
+            _ => {
+                let [first, tail @ ..] = name.names.as_slice() else {
+                    panic!("No name for function?");
+                };
+                let start = self.resolve(first.value);
+                nt::FunctionName::Path {
+                    start,
+                    names: tail
+                        .iter()
+                        .map(|t| self.insert_string(t.value.as_bytes()))
+                        .collect(),
+                    method: name.method.map(|m| self.insert_string(m.value.as_bytes())),
+                }
+            }
+        };
+
+        let has_self = matches!(
+            name,
+            nt::FunctionName::Path {
+                method: Some(_),
+                ..
+            }
+        );
+        let body = self.function(body, has_self);
+        nt::Statement::Function { name, body }
+    }
+
     /// Resolve a return statement
     fn ret_stat(&mut self, ret: &ast::ReturnStatement) -> nt::ReturnStatement {
         nt::ReturnStatement {
@@ -399,6 +497,7 @@ impl<'a> Resolver<'a> {
             out.push(nt::Statement::Assign {
                 vars: names,
                 exps: values,
+                is_global_init: false,
             });
         }
     }
@@ -469,6 +568,7 @@ impl<'a> Resolver<'a> {
             out.push(nt::Statement::Assign {
                 vars: names,
                 exps: values,
+                is_global_init: true,
             });
         }
     }
@@ -483,7 +583,7 @@ impl<'a> Resolver<'a> {
             ast::Expression::String(tok) => nt::Expression::String(self.string(*tok)),
             ast::Expression::DotDotDot => nt::Expression::DotDotDot(self.resolve("...")),
             ast::Expression::Function(function) => {
-                nt::Expression::Function(self.function(function))
+                nt::Expression::Function(self.function(function, false))
             }
             ast::Expression::Prefix(pre) => nt::Expression::Prefix(self.prefix(pre)),
             ast::Expression::Table(field_list) => {
@@ -502,9 +602,33 @@ impl<'a> Resolver<'a> {
     }
 
     /// Resolve a function expression (lambda)
-    fn function(&mut self, function: &ast::Function) -> nt::Function {
+    fn function(&mut self, function: &ast::Function, has_self: bool) -> nt::Function {
         self.scope_enter();
         self.function_depth += 1;
+
+        let self_var = if has_self {
+            let var = nt::VariableId(
+                self.variable_table
+                    .len()
+                    .try_into()
+                    .expect("Too many variables within module"),
+            );
+            let s = self.insert_string(b"self");
+            self.variable_table.push(nt::Variable::Local(nt::Local {
+                line: None,
+                name: s,
+                attr_close: false,
+                attr_const: false,
+            }));
+            self.locals.push(Variable::Var {
+                depth: self.scope_depth,
+                id: var,
+                func_depth: None,
+            });
+            Some(var)
+        } else {
+            None
+        };
 
         let names = function
             .parameters
@@ -571,7 +695,7 @@ impl<'a> Resolver<'a> {
         });
 
         let parameters = nt::ParameterList {
-            self_var: None,
+            self_var,
             names,
             var_name,
         };

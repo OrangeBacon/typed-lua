@@ -125,6 +125,7 @@ pub enum Statement {
     Assign {
         vars: Vec<Var>,
         exps: Vec<Expression>,
+        is_global_init: bool,
     },
     Call(FunctionCall),
     Label(Label),
@@ -179,10 +180,17 @@ pub struct Label {
 
 /// funcname ::= Name {‘.’ Name} [‘:’ Name]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FunctionName {
-    pub start: VariableId,
-    pub names: Vec<StringId>,
-    pub method: Option<StringId>,
+pub enum FunctionName {
+    /// Used for local or global function declarations (depending on the kind of
+    /// variable referenced)
+    Define { var: VariableId },
+    /// A function which isn't local or global, so can be assigned outside of the
+    /// root of an object.
+    Path {
+        start: VariableId,
+        names: Vec<StringId>,
+        method: Option<StringId>,
+    },
 }
 
 /// varlist ::= var {‘,’ var}
