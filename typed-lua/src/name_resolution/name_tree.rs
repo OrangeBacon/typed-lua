@@ -42,7 +42,11 @@ pub struct NameContainer<T> {
     pub number_table: Vec<Number>,
 
     /// All variables defined or used in this tree.
-    pub variable_table: Vec<Variable>,
+    pub variable_table: Vec<Local>,
+
+    /// The initial environment variable that is set prior to entering this piece
+    /// of code, value of resolving `_ENV` prior to anything happening.
+    pub env: VariableId,
 }
 
 /// ID of a string within the string table
@@ -64,13 +68,6 @@ pub enum Number {
     Float(f64),
 }
 
-/// Either a local or global variable.  Var args (`...`) count as local.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Variable {
-    Local(Local),
-    Global(Global),
-}
-
 /// Local variables
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Local {
@@ -78,16 +75,6 @@ pub struct Local {
     pub name: StringId,
     pub attr_close: bool,
     pub attr_const: bool,
-}
-
-/// Global variable
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Global {
-    /// May be introduced at a variable read
-    pub line: Option<usize>,
-    pub name: StringId,
-    pub attr_const: bool,
-    // attr_close is not valid for globals
 }
 
 /// A sequence of code.  Note that block and chunk are the same in lua.  A file
@@ -183,9 +170,17 @@ pub struct Label {
 pub enum FunctionName {
     /// Used for local or global function declarations (depending on the kind of
     /// variable referenced)
-    Define { var: VariableId },
+    DefineLocal {
+        var: VariableId,
+    },
+    DefineGlobal {
+        env: VariableId,
+        names: Vec<StringId>,
+    },
     /// A function which isn't local or global, so can be assigned outside of the
-    /// root of an object.
+    /// root of an object.  If the start of the path is a global variable, the start
+    /// will be re-written to be the current value of `_ENV`, with the name of
+    /// the global as the first element of the `names` vec.
     Path {
         start: VariableId,
         names: Vec<StringId>,
@@ -197,7 +192,11 @@ pub enum FunctionName {
 /// var ::=  Name | prefixexp ‘[’ exp ‘]’ | prefixexp ‘.’ Name
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Var {
-    Name(VariableId),
+    LocalName(VariableId),
+    GlobalNames {
+        env: VariableId,
+        names: Vec<StringId>,
+    },
     Index {
         first: PrefixExpression,
         index: Expression,
@@ -221,7 +220,6 @@ pub enum Expression {
     Bool(bool),
     Number(NumberId),
     String(StringId),
-    DotDotDot(VariableId),
     Function(Function),
     Prefix(PrefixExpression),
     Table(FieldList),

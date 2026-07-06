@@ -1,2 +1,3 @@
-global print
-global function a() print() end
+global a = 5
+a = 6
+global function a() end

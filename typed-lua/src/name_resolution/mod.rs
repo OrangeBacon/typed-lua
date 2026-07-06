@@ -8,6 +8,9 @@ mod name_tree;
 use hashbrown::{HashMap, hash_map::EntryRef};
 use name_tree as nt;
 
+/// Name of the `_ENV` variable in lua source code
+const ENVIRONMENT: &str = "_ENV";
+
 /// Run the name resolution pass over a parsed AST.
 #[derive(Debug, Clone)]
 pub struct Resolver<'a> {
@@ -18,9 +21,8 @@ pub struct Resolver<'a> {
 
     number_table: Vec<nt::Number>,
 
-    variable_table: Vec<nt::Variable>,
+    variable_table: Vec<nt::Local>,
     locals: Vec<Variable>,
-    globals: HashMap<nt::StringId, nt::VariableId>,
     scope_depth: usize,
     function_depth: usize,
 }
@@ -35,10 +37,6 @@ enum Variable {
         // not be resolved in a deeper function
         func_depth: Option<usize>,
     },
-    Collective {
-        depth: usize,
-        attr_const: bool,
-    },
     /// Refer to an existing variable with a different name.  Note that this is
     /// only referencing a variable, alias -> alias is not supported.
     Alias {
@@ -51,26 +49,55 @@ enum Variable {
 impl<'a> Resolver<'a> {
     /// Create a new name resolver
     pub fn new(ast: &'a ast::Block<'a>) -> Self {
-        Self {
+        let mut this = Self {
             ast,
             string_table: vec![],
             string_lookup: HashMap::new(),
             number_table: vec![],
             variable_table: vec![],
             locals: vec![],
-            globals: HashMap::new(),
             scope_depth: 0,
             function_depth: 0,
-        }
+        };
+
+        // Insert the `_ENV` local so there is a base case for global variable
+        // resolution, so `self.resolve` doesn't infinitely recurse for global
+        // variables
+        let env_s = this.insert_string(ENVIRONMENT.as_bytes());
+        let var = nt::VariableId(
+            this.variable_table
+                .len()
+                .try_into()
+                .expect("Too many variables within module"),
+        );
+        this.variable_table.push(nt::Local {
+            line: None,
+            name: env_s,
+            attr_close: false,
+            attr_const: false,
+        });
+        this.locals.push(Variable::Var {
+            depth: 0,
+            id: var,
+            func_depth: None,
+        });
+
+        this
     }
 
     /// Get the resolved tree for the input ast.
     pub fn run(mut self) -> nt::NameContainer<nt::Block> {
+        let env = self.resolve(ENVIRONMENT);
+        let ResolveResult::Local(env) = env else {
+            panic!("Top level env lookup");
+        };
+
         nt::NameContainer {
             tree: self.block(self.ast),
             string_table: self.string_table,
             number_table: self.number_table,
             variable_table: self.variable_table,
+            env,
         }
     }
 
@@ -139,18 +166,8 @@ impl<'a> Resolver<'a> {
                 out.push(self.function_statement(name, body, *vis))
             }
             ast::Statement::Declare { vis, names, exprs } => self.declare(*vis, names, exprs, out),
-            ast::Statement::GlobalCollective { attrib } => {
-                if let Some(attr) = attrib
-                    && attr.name.value != "const"
-                {
-                    panic!("Unknown attribute: {}", attr.name.value);
-                }
-
-                let attr_const = attrib.is_some();
-                self.locals.push(Variable::Collective {
-                    depth: self.scope_depth,
-                    attr_const,
-                });
+            ast::Statement::GlobalCollective { .. } => {
+                // do nothing, pretend this doesn't exist
             }
         }
     }
@@ -164,10 +181,12 @@ impl<'a> Resolver<'a> {
             .map(|v| {
                 if let ast::Var::Name(tok) = v {
                     let var = self.resolve(tok.value);
-                    let var = &self.variable_table[var.0 as usize];
                     let is_const = match var {
-                        name_tree::Variable::Local(local) => local.attr_const,
-                        name_tree::Variable::Global(global) => global.attr_const,
+                        ResolveResult::Local(var) => {
+                            let var = &self.variable_table[var.0 as usize];
+                            var.attr_const
+                        }
+                        ResolveResult::Global { .. } => false,
                     };
                     if is_const {
                         panic!("Attempt to assign to const variable `{}`", tok.value);
@@ -235,12 +254,12 @@ impl<'a> Resolver<'a> {
                 .expect("Too many variables within module"),
         );
         let s = self.insert_string(name.value.as_bytes());
-        self.variable_table.push(nt::Variable::Local(nt::Local {
+        self.variable_table.push(nt::Local {
             line: Some(name.line),
             name: s,
             attr_close: false,
             attr_const: true,
-        }));
+        });
         self.locals.push(Variable::Var {
             depth: self.scope_depth,
             id: var,
@@ -283,12 +302,12 @@ impl<'a> Resolver<'a> {
                         .expect("Too many variables within module"),
                 );
                 let s = self.insert_string(name.value.as_bytes());
-                self.variable_table.push(nt::Variable::Local(nt::Local {
+                self.variable_table.push(nt::Local {
                     line: Some(name.line),
                     name: s,
                     attr_close: false,
                     attr_const: idx == 0,
-                }));
+                });
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
@@ -333,19 +352,19 @@ impl<'a> Resolver<'a> {
                         .expect("Too many variables within module"),
                 );
                 let s = self.insert_string(name.value.as_bytes());
-                self.variable_table.push(nt::Variable::Local(nt::Local {
+                self.variable_table.push(nt::Local {
                     line: Some(name.line),
                     name: s,
                     attr_close: false,
                     attr_const: false,
-                }));
+                });
 
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
                     func_depth: None,
                 });
-                nt::FunctionName::Define { var }
+                nt::FunctionName::DefineLocal { var }
             }
             Some(ast::Visibility::Global) => {
                 if name.method.is_some() {
@@ -355,38 +374,26 @@ impl<'a> Resolver<'a> {
                     panic!("Only 1 name component allowed in global function statement")
                 };
 
-                let var = nt::VariableId(
-                    self.variable_table
-                        .len()
-                        .try_into()
-                        .expect("Too many variables within module"),
-                );
-                let s = self.insert_string(name.value.as_bytes());
-                self.variable_table.push(nt::Variable::Global(nt::Global {
-                    line: Some(name.line),
-                    name: s,
-                    attr_const: false,
-                }));
+                let (env, names) = match self.resolve(name.value) {
+                    ResolveResult::Local(id) => (id, vec![]),
+                    ResolveResult::Global { env, names } => (env, names),
+                };
 
-                self.locals.push(Variable::Var {
-                    depth: self.scope_depth,
-                    id: var,
-                    func_depth: None,
-                });
-
-                nt::FunctionName::Define { var }
+                nt::FunctionName::DefineGlobal { env, names }
             }
             _ => {
                 let [first, tail @ ..] = name.names.as_slice() else {
                     panic!("No name for function?");
                 };
-                let start = self.resolve(first.value);
+                let (start, mut names) = match self.resolve(first.value) {
+                    ResolveResult::Local(id) => (id, vec![]),
+                    ResolveResult::Global { env, names } => (env, names),
+                };
+                names.extend(tail.iter().map(|t| self.insert_string(t.value.as_bytes())));
+
                 nt::FunctionName::Path {
                     start,
-                    names: tail
-                        .iter()
-                        .map(|t| self.insert_string(t.value.as_bytes()))
-                        .collect(),
+                    names,
                     method: name.method.map(|m| self.insert_string(m.value.as_bytes())),
                 }
             }
@@ -476,12 +483,12 @@ impl<'a> Resolver<'a> {
                         .try_into()
                         .expect("Too many variables within module"),
                 );
-                self.variable_table.push(nt::Variable::Local(nt::Local {
+                self.variable_table.push(nt::Local {
                     line: Some(name.line),
                     name: s,
                     attr_close: is_close,
                     attr_const: is_const,
-                }));
+                });
 
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
@@ -489,7 +496,7 @@ impl<'a> Resolver<'a> {
                     func_depth: None,
                 });
                 out.push(nt::Statement::ScopeStart(var));
-                nt::Var::Name(var)
+                nt::Var::LocalName(var)
             })
             .collect();
 
@@ -511,15 +518,11 @@ impl<'a> Resolver<'a> {
     ) {
         let values = exprs.iter().map(|e| self.expr(e)).collect();
 
-        let mut all_const = false;
-
         if let Some(all) = &names.attrib {
             let name = all.name.value;
-            if name == "const" {
-                all_const = true;
-            } else if name == "close" {
+            if name == "close" {
                 panic!("The `close` attribute can only be applied to local variables");
-            } else {
+            } else if name != "const" {
                 panic!("Unknown attribute: {name}");
             }
         }
@@ -528,39 +531,17 @@ impl<'a> Resolver<'a> {
             .names
             .iter()
             .map(|(name, attr)| {
-                let s = self.insert_string(name.value.as_bytes());
-
-                let mut is_const = all_const;
-
                 if let Some(attr) = attr {
                     let name = attr.name.value;
-                    if name == "const" {
-                        is_const = true;
-                    } else if name == "close" {
+                    if name == "close" {
                         panic!("The `close` attribute can only be applied to local variables");
-                    } else {
+                    } else if name != "const" {
                         panic!("Unknown attribute: {name}");
                     }
                 }
 
-                let var = nt::VariableId(
-                    self.variable_table
-                        .len()
-                        .try_into()
-                        .expect("Too many variables within module"),
-                );
-                self.variable_table.push(nt::Variable::Global(nt::Global {
-                    line: Some(name.line),
-                    name: s,
-                    attr_const: is_const,
-                }));
-
-                self.locals.push(Variable::Var {
-                    depth: self.scope_depth,
-                    id: var,
-                    func_depth: None,
-                });
-                nt::Var::Name(var)
+                let res = self.resolve(name.value);
+                self.resolved_var(res)
             })
             .collect();
 
@@ -581,7 +562,10 @@ impl<'a> Resolver<'a> {
             ast::Expression::True => nt::Expression::Bool(true),
             ast::Expression::Number(tok) => nt::Expression::Number(self.number(*tok)),
             ast::Expression::String(tok) => nt::Expression::String(self.string(*tok)),
-            ast::Expression::DotDotDot => nt::Expression::DotDotDot(self.resolve("...")),
+            ast::Expression::DotDotDot => {
+                let var = self.resolve("...");
+                nt::Expression::Prefix(nt::PrefixExpression::Var(Box::new(self.resolved_var(var))))
+            }
             ast::Expression::Function(function) => {
                 nt::Expression::Function(self.function(function, false))
             }
@@ -614,12 +598,12 @@ impl<'a> Resolver<'a> {
                     .expect("Too many variables within module"),
             );
             let s = self.insert_string(b"self");
-            self.variable_table.push(nt::Variable::Local(nt::Local {
+            self.variable_table.push(nt::Local {
                 line: None,
                 name: s,
                 attr_close: false,
                 attr_const: false,
-            }));
+            });
             self.locals.push(Variable::Var {
                 depth: self.scope_depth,
                 id: var,
@@ -642,12 +626,12 @@ impl<'a> Resolver<'a> {
                         .expect("Too many variables within module"),
                 );
                 let s = self.insert_string(name.value.as_bytes());
-                self.variable_table.push(nt::Variable::Local(nt::Local {
+                self.variable_table.push(nt::Local {
                     line: Some(name.line),
                     name: s,
                     attr_close: false,
                     attr_const: false,
-                }));
+                });
                 self.locals.push(Variable::Var {
                     depth: self.scope_depth,
                     id: var,
@@ -666,12 +650,12 @@ impl<'a> Resolver<'a> {
                     .expect("Too many variables within module"),
             );
             let s = self.insert_string(b"...");
-            self.variable_table.push(nt::Variable::Local(nt::Local {
+            self.variable_table.push(nt::Local {
                 line: None,
                 name: s,
                 attr_close: false,
                 attr_const: false,
-            }));
+            });
             self.locals.push(Variable::Var {
                 depth: self.scope_depth,
                 id: var,
@@ -749,7 +733,10 @@ impl<'a> Resolver<'a> {
     /// Resolve a var expression
     fn var(&mut self, var: &ast::Var) -> nt::Var {
         match var {
-            ast::Var::Name(token) => nt::Var::Name(self.resolve(token.value)),
+            ast::Var::Name(token) => {
+                let var = self.resolve(token.value);
+                self.resolved_var(var)
+            }
             ast::Var::Index { first, index } => nt::Var::Index {
                 first: self.prefix(first),
                 index: self.expr(index),
@@ -758,6 +745,14 @@ impl<'a> Resolver<'a> {
                 first: self.prefix(first),
                 name: self.insert_string(name.value.as_bytes()),
             },
+        }
+    }
+
+    /// Convert a Resolver result into an nt::Var
+    fn resolved_var(&mut self, res: ResolveResult) -> nt::Var {
+        match res {
+            ResolveResult::Local(variable_id) => nt::Var::LocalName(variable_id),
+            ResolveResult::Global { env, names } => nt::Var::GlobalNames { env, names },
         }
     }
 
@@ -783,105 +778,58 @@ impl<'a> Resolver<'a> {
                 .collect(),
         }
     }
+}
 
+enum ResolveResult {
+    Local(nt::VariableId),
+    Global {
+        /// value of `_ENV` at the point the variable was resolved
+        env: nt::VariableId,
+
+        /// string to lookup within `_ENV`
+        names: Vec<nt::StringId>,
+    },
+}
+
+impl<'a> Resolver<'a> {
     /// Get a variable id for a variable name
-    fn resolve(&mut self, name: &str) -> nt::VariableId {
-        #[derive(PartialEq)]
-        enum ResolveState {
-            Global,
-            Collective,
-            CollectiveConst,
-            None,
-        }
-
+    fn resolve(&mut self, name: &str) -> ResolveResult {
         let s = self.insert_string(name.as_bytes());
-
-        let mut state = ResolveState::None;
 
         // iterate through a stack, top first (fifo)
         for l in self.locals.iter().rev() {
             match l {
                 Variable::Var { id, func_depth, .. } => {
                     let var = &self.variable_table[id.0 as usize];
-                    if state == ResolveState::None && matches!(var, nt::Variable::Global(_)) {
-                        state = ResolveState::Global;
-                    }
 
-                    let name = match var {
-                        nt::Variable::Local(local) => local.name,
-                        nt::Variable::Global(global) => global.name,
-                    };
-                    if name == s
+                    if var.name == s
                         && (func_depth.is_none() || *func_depth == Some(self.function_depth))
                     {
-                        return *id;
-                    }
-                }
-                Variable::Collective { attr_const, .. } => {
-                    // found a `global *`
-                    if state != ResolveState::None {
-                        continue;
-                    }
-                    if *attr_const {
-                        state = ResolveState::CollectiveConst
-                    } else {
-                        state = ResolveState::Collective
+                        return ResolveResult::Local(*id);
                     }
                 }
                 Variable::Alias { name, id, .. } => {
-                    let var = &self.variable_table[id.0 as usize];
-                    if state == ResolveState::None && matches!(var, nt::Variable::Global(_)) {
-                        state = ResolveState::Global;
-                    }
-
                     if *name == s {
-                        return *id;
+                        return ResolveResult::Local(*id);
                     }
                 }
             }
         }
 
-        // did not find anything already declared, so work out what to do now
-        let attr_const = match state {
-            ResolveState::Global => {
-                // found a `global var_name` declaration first, so error on undef
-                panic!("Undefined variable: `{name}`")
-            }
-            ResolveState::None | ResolveState::Collective => false,
-            ResolveState::CollectiveConst => true,
+        // no locals, so find a global
+
+        // Need an environment for the global to be looked up in, so find a variable
+        // that is the current environment.  This recurses back into the resolve
+        // function, to stop the infinite recursion, the constructor for the name
+        // resolver creates a variable `_ENV` so this will always resolve.
+        let env = self.resolve(ENVIRONMENT);
+        let (env, mut names) = match env {
+            ResolveResult::Local(id) => (id, vec![]),
+            ResolveResult::Global { env, names } => (env, names),
         };
+        names.push(s);
 
-        // try to find a global, if not, create one with the given `const` attr
-        if let Some(&g) = self.globals.get(&s) {
-            return g;
-        }
-
-        let var = nt::VariableId(
-            self.variable_table
-                .len()
-                .try_into()
-                .expect("Too many variables within module"),
-        );
-
-        // This code creates the global within the `if false`, where is is
-        // mutable, so its use outside of the never-executed code still believes
-        // it is mutable, as mutability is a property of the global, rather than
-        // something that is lexically scoped.  This is considered to be intentional,
-        // although we should probably provide a warning somehow? warnings are
-        // not at all a priority yet.
-        // ```lua
-        // global<const>*
-        // if false then global a = 5 end
-        // a = 6 -- a isn't constant here, due to the previous global declaration
-        // ```
-        self.variable_table.push(nt::Variable::Global(nt::Global {
-            line: None,
-            name: s,
-            attr_const,
-        }));
-
-        self.globals.insert(s, var);
-        var
+        ResolveResult::Global { env, names }
     }
 
     /// Enter a lexical scope
@@ -896,14 +844,11 @@ impl<'a> Resolver<'a> {
         while let Some(last) = self.locals.last() {
             let depth = match last {
                 Variable::Var { depth, .. } => *depth,
-                Variable::Collective { depth, .. } => *depth,
                 Variable::Alias { depth, .. } => *depth,
             };
 
             if depth > self.scope_depth {
-                if let Variable::Var { id: var, .. } = last
-                    && matches!(self.variable_table[var.0 as usize], nt::Variable::Local(_))
-                {
+                if let Variable::Var { id: var, .. } = last {
                     out.push(nt::Statement::ScopeEnd(*var));
                 }
 
