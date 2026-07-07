@@ -88,7 +88,7 @@ pub struct Local {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Label {
     pub line: Option<usize>,
-    pub name: StringId,
+    pub name: Option<StringId>,
 }
 
 /// A sequence of code.  Note that block and chunk are the same in lua.  A file
@@ -214,7 +214,6 @@ pub enum Var {
 }
 
 // namelist ::= Name {‘,’ Name}
-
 
 /// explist ::= exp {‘,’ exp}
 /// exp ::=  nil | false | true | Numeral | LiteralString | ‘...’ | functiondef |

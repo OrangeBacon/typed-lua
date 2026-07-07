@@ -1,7 +1,5 @@
-::a::
-
-function a()
-    ::a::goto a
+for a in 5 do
+    for i=1,2 do
+        break
+    end
 end
-
-goto a

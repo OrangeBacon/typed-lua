@@ -52,10 +52,15 @@ enum Variable {
 /// A potentially resolved label
 #[derive(Debug, Clone)]
 struct Label {
-    name: nt::StringId,
+    name: Option<nt::StringId>,
+
     line: Option<usize>,
+
     defined: bool,
+
     func_depth: usize,
+
+    break_target: bool,
 }
 
 impl<'a> Resolver<'a> {
@@ -159,14 +164,11 @@ impl<'a> Resolver<'a> {
             ast::Statement::Assign { vars, exps } => out.push(self.assign(vars, exps)),
             ast::Statement::Call(call) => out.push(nt::Statement::Call(self.call(call))),
             ast::Statement::Label(label) => out.push(self.label(label)),
-            ast::Statement::Break => todo!(),
+            ast::Statement::Break => out.push(self.goto_break()),
             ast::Statement::Goto(token) => out.push(self.goto(*token)),
             ast::Statement::Block(block) => out.push(nt::Statement::Block(self.block(block))),
-            ast::Statement::While { expr, block } => out.push(nt::Statement::While {
-                expr: self.expr(expr),
-                block: self.block(block),
-            }),
-            ast::Statement::Repeat { block, expr } => out.push(self.repeat(block, expr)),
+            ast::Statement::While { expr, block } => self.while_loop(out, expr, block),
+            ast::Statement::Repeat { block, expr } => self.repeat(out, block, expr),
             ast::Statement::If {
                 expr,
                 block,
@@ -187,12 +189,12 @@ impl<'a> Resolver<'a> {
                 limit,
                 step,
                 block,
-            } => out.push(self.for_loop(*name, initial, limit, step.as_ref(), block)),
+            } => self.for_loop(out, *name, initial, limit, step.as_ref(), block),
             ast::Statement::ForEach {
                 names,
                 exprs,
                 block,
-            } => out.push(self.for_each(names, exprs, block)),
+            } => self.for_each(out, names, exprs, block),
             ast::Statement::Function { name, body, vis } => {
                 out.push(self.function_statement(name, body, *vis))
             }
@@ -233,12 +235,27 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    fn while_loop(
+        &mut self,
+        out: &mut Vec<nt::Statement>,
+        expr: &ast::Expression,
+        block: &ast::Block,
+    ) {
+        let expr = self.expr(expr);
+        let break_id = self.push_break_target();
+        let block = self.block(block);
+
+        out.push(nt::Statement::While { expr, block });
+        out.push(self.pop_break_target(break_id));
+    }
+
     /// Resolve a repeat statement
-    fn repeat(&mut self, block: &ast::Block, expr: &ast::Expression) -> nt::Statement {
+    fn repeat(&mut self, out: &mut Vec<nt::Statement>, block: &ast::Block, expr: &ast::Expression) {
         // this is not using the normal `self.block` method as we need to extend
         // the scope of the repeat block into the controlling expression after
         // the block finishes.  `repeat local a = 5 until a < 3` should be valid.
 
+        let break_id = self.push_break_target();
         self.scope_enter();
 
         let mut statements = Vec::with_capacity(block.statements.len());
@@ -252,7 +269,7 @@ impl<'a> Resolver<'a> {
         let mut leave = vec![];
         self.scope_leave(&mut leave);
 
-        nt::Statement::Repeat {
+        out.push(nt::Statement::Repeat {
             block: nt::Block {
                 statements,
                 ret_stat,
@@ -260,18 +277,20 @@ impl<'a> Resolver<'a> {
             },
             expr,
             block_end: leave,
-        }
+        });
+        out.push(self.pop_break_target(break_id));
     }
 
     /// Resolve a for loop
     fn for_loop(
         &mut self,
+        out: &mut Vec<nt::Statement>,
         name: Token,
         initial: &ast::Expression,
         limit: &ast::Expression,
         step: Option<&ast::Expression>,
         block: &ast::Block,
-    ) -> nt::Statement {
+    ) {
         let initial = self.expr(initial);
         let limit = self.expr(limit);
         let step = step.map(|s| self.expr(s));
@@ -297,27 +316,30 @@ impl<'a> Resolver<'a> {
             func_depth: None,
         });
 
+        let break_id = self.push_break_target();
         let block = self.block(block);
 
         // leave will only close the loop variable which isn't close
         self.scope_leave(&mut vec![]);
 
-        nt::Statement::For {
+        out.push(nt::Statement::For {
             name: var,
             initial,
             limit,
             step,
             block,
-        }
+        });
+        out.push(self.pop_break_target(break_id));
     }
 
     /// Resolve a for each loop
     fn for_each(
         &mut self,
+        out: &mut Vec<nt::Statement>,
         names: &[Token],
         exprs: &[ast::Expression],
         block: &ast::Block,
-    ) -> nt::Statement {
+    ) {
         let exprs = exprs.iter().map(|e| self.expr(e)).collect();
 
         self.scope_enter();
@@ -348,16 +370,18 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
+        let break_id = self.push_break_target();
         let block = self.block(block);
 
         // leave will only close the loop variable which isn't close
         self.scope_leave(&mut vec![]);
 
-        nt::Statement::ForEach {
+        out.push(nt::Statement::ForEach {
             names,
             exprs,
             block,
-        }
+        });
+        out.push(self.pop_break_target(break_id));
     }
 
     /// Resolve a function definition statement
@@ -783,6 +807,24 @@ impl<'a> Resolver<'a> {
         nt::Statement::Label(id)
     }
 
+    /// Resolve a break statement into a goto statement
+    fn goto_break(&mut self) -> nt::Statement {
+        for &id in self.labels.iter().rev() {
+            let label = &self.label_table[id.0 as usize];
+
+            if label.func_depth != self.function_depth {
+                break;
+            }
+            if !label.break_target {
+                continue;
+            }
+
+            return nt::Statement::Goto(id);
+        }
+
+        panic!("Break outside of a loop")
+    }
+
     /// Resolve a goto statement
     fn goto(&mut self, tok: Token) -> nt::Statement {
         nt::Statement::Goto(self.get_label(tok))
@@ -799,7 +841,7 @@ impl<'a> Resolver<'a> {
                 break;
             }
 
-            if label.name == s {
+            if label.name == Some(s) {
                 return *id;
             }
         }
@@ -812,13 +854,52 @@ impl<'a> Resolver<'a> {
                 .expect("Too many labels within module"),
         );
         self.label_table.push(Label {
-            name: s,
+            name: Some(s),
             line: Some(name.line),
             defined: false,
             func_depth: self.function_depth,
+            break_target: false,
         });
         self.labels.push(id);
         id
+    }
+
+    /// Add a loop break target to the list of labels
+    fn push_break_target(&mut self) -> nt::LabelId {
+        let id = nt::LabelId(
+            self.label_table
+                .len()
+                .try_into()
+                .expect("Too many labels within module"),
+        );
+        self.label_table.push(Label {
+            name: None,
+            line: None,
+            defined: true,
+            func_depth: self.function_depth,
+            break_target: true,
+        });
+        self.labels.push(id);
+        id
+    }
+
+    /// Remove a loop break target, following a loop, return the label target statement
+    fn pop_break_target(&mut self, break_id: nt::LabelId) -> nt::Statement {
+        for (idx, &id) in self.labels.iter().enumerate().rev() {
+            let label = &self.label_table[id.0 as usize];
+
+            if label.func_depth != self.function_depth {
+                break;
+            }
+            if !label.break_target || id != break_id {
+                continue;
+            }
+
+            self.labels.remove(idx);
+            return nt::Statement::Label(id);
+        }
+
+        panic!("Unmatched loop break")
     }
 
     /// Resolve a var expression
