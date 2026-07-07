@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// Pretty printer for all AST nodes
-pub struct AstPrint<'a, T> {
+pub struct AstPrint<'a, T: ?Sized> {
     node: &'a T,
     tree: TreeCtx,
 }
@@ -46,7 +46,7 @@ impl<'a, T> AstPrint<'a, T> {
     }
 
     /// Swap the content without changing levels
-    fn swap<U>(&self, swap: &'a U) -> AstPrint<'a, U> {
+    fn swap<U: ?Sized>(&self, swap: &'a U) -> AstPrint<'a, U> {
         AstPrint {
             node: swap,
             tree: self.tree.clone(),
@@ -54,7 +54,7 @@ impl<'a, T> AstPrint<'a, T> {
     }
 }
 
-impl<T: SizeOf> AstPrint<'_, T> {
+impl<T: ?Sized + SizeOf> AstPrint<'_, T> {
     /// Display the name of this node
     fn print(&self, f: &mut Formatter<'_>, name: &str) -> fmt::Result {
         self.tree.print(f, name, None, self.node)
@@ -68,6 +68,12 @@ impl<T: SizeOf> AstPrint<'_, T> {
         len: impl Into<Option<usize>>,
     ) -> fmt::Result {
         self.tree.print(f, name, len, self.node)
+    }
+}
+
+impl Display for AstPrint<'_, str> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.print(f, self.node)
     }
 }
 
@@ -343,12 +349,12 @@ impl Display for AstPrint<'_, Var<'_>> {
 impl Display for AstPrint<'_, Expression<'_>> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.node {
-            Expression::Nil => self.swap(&"Nil").fmt(f),
-            Expression::False => self.swap(&"False").fmt(f),
-            Expression::True => self.swap(&"True").fmt(f),
+            Expression::Nil => self.swap("Nil").fmt(f),
+            Expression::False => self.swap("False").fmt(f),
+            Expression::True => self.swap("True").fmt(f),
             Expression::Number(token) => self.swap(token).name("Number").fmt(f),
             Expression::String(token) => self.swap(token).name("String").fmt(f),
-            Expression::DotDotDot => self.swap(&"\"...\"").fmt(f),
+            Expression::DotDotDot => self.swap("\"...\"").fmt(f),
             Expression::Function(function) => self.swap(function).fmt(f),
             Expression::Prefix(pre) => self.swap(pre).fmt(f),
             Expression::Table(fields) => self.swap(fields).name("Table").fmt(f),

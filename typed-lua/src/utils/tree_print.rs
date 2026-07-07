@@ -68,7 +68,7 @@ impl TreeCtx {
         f: &mut Formatter<'_>,
         value: &str,
         len: impl Into<Option<usize>>,
-        size: impl SizeOf,
+        size: &(impl ?Sized + SizeOf),
     ) -> fmt::Result {
         if !self.prefix.is_empty() {
             write!(f, "{}", self.prefix)?;

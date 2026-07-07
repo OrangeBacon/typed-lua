@@ -1,12 +1,5 @@
 use crate::{
-    parser::{
-        ast::{
-            Attribute, AttributeNameList, BinaryOperator, Block, Expression, Field, FieldList,
-            Function, FunctionArgs, FunctionCall, FunctionName, Label, ParameterList,
-            PrefixExpression, ReturnStatement, Statement, UnaryOperator, Var, Visibility,
-        },
-        lexer::Token,
-    },
+    parser::{ast::*, lexer::Token},
     utils::SizeOf,
 };
 
@@ -18,7 +11,11 @@ impl SizeOf for Token<'_> {
 
 impl SizeOf for Block<'_> {
     fn size(&self) -> usize {
-        self.statements.size() + self.ret_stat.size()
+        let Block {
+            statements,
+            ret_stat,
+        } = self;
+        statements.size() + ret_stat.size()
     }
 }
 
@@ -67,31 +64,36 @@ impl SizeOf for Visibility {
 
 impl SizeOf for AttributeNameList<'_> {
     fn size(&self) -> usize {
-        self.attrib.size() + self.names.size()
+        let AttributeNameList { attrib, names } = self;
+        attrib.size() + names.size()
     }
 }
 
 impl SizeOf for Attribute<'_> {
     fn size(&self) -> usize {
-        self.name.size()
+        let Attribute { name } = self;
+        name.size()
     }
 }
 
 impl SizeOf for ReturnStatement<'_> {
     fn size(&self) -> usize {
-        self.exprs.size()
+        let ReturnStatement { exprs } = self;
+        exprs.size()
     }
 }
 
 impl SizeOf for Label<'_> {
     fn size(&self) -> usize {
-        0
+        let Label { name } = self;
+        name.size()
     }
 }
 
 impl SizeOf for FunctionName<'_> {
     fn size(&self) -> usize {
-        self.names.size() + self.method.size()
+        let FunctionName { names, method } = self;
+        names.size() + method.size()
     }
 }
 
@@ -135,7 +137,12 @@ impl SizeOf for PrefixExpression<'_> {
 
 impl SizeOf for FunctionCall<'_> {
     fn size(&self) -> usize {
-        self.receiver.size() + self.method_name.size() + self.args.size()
+        let FunctionCall {
+            receiver,
+            method_name,
+            args,
+        } = self;
+        receiver.size() + method_name.size() + args.size()
     }
 }
 
@@ -151,19 +158,22 @@ impl SizeOf for FunctionArgs<'_> {
 
 impl SizeOf for Function<'_> {
     fn size(&self) -> usize {
-        self.parameters.size() + self.body.size()
+        let Function { parameters, body } = self;
+        parameters.size() + body.size()
     }
 }
 
 impl SizeOf for ParameterList<'_> {
     fn size(&self) -> usize {
-        self.names.size() + self.var_name.size()
+        let ParameterList { names, var_name } = self;
+        names.size() + var_name.size()
     }
 }
 
 impl SizeOf for FieldList<'_> {
     fn size(&self) -> usize {
-        self.fields.size()
+        let FieldList { fields } = self;
+        fields.size()
     }
 }
 
