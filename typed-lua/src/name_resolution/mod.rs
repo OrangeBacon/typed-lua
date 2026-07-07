@@ -25,6 +25,9 @@ pub struct Resolver<'a> {
     locals: Vec<Variable>,
     scope_depth: usize,
     function_depth: usize,
+
+    label_table: Vec<Label>,
+    labels: Vec<nt::LabelId>,
 }
 
 /// All state for variable resolution
@@ -46,6 +49,15 @@ enum Variable {
     },
 }
 
+/// A potentially resolved label
+#[derive(Debug, Clone)]
+struct Label {
+    name: nt::StringId,
+    line: Option<usize>,
+    defined: bool,
+    func_depth: usize,
+}
+
 impl<'a> Resolver<'a> {
     /// Create a new name resolver
     pub fn new(ast: &'a ast::Block<'a>) -> Self {
@@ -58,6 +70,8 @@ impl<'a> Resolver<'a> {
             locals: vec![],
             scope_depth: 0,
             function_depth: 0,
+            label_table: vec![],
+            labels: vec![],
         };
 
         // Insert the `_ENV` local so there is a base case for global variable
@@ -92,11 +106,28 @@ impl<'a> Resolver<'a> {
             panic!("Top level env lookup");
         };
 
+        let tree = self.block(self.ast);
+
+        let label_table = self
+            .label_table
+            .into_iter()
+            .map(|l| {
+                if !l.defined {
+                    panic!("Use of un-defined label");
+                }
+                nt::Label {
+                    line: l.line,
+                    name: l.name,
+                }
+            })
+            .collect();
+
         nt::NameContainer {
-            tree: self.block(self.ast),
+            tree,
             string_table: self.string_table,
             number_table: self.number_table,
             variable_table: self.variable_table,
+            label_table,
             env,
         }
     }
@@ -127,9 +158,9 @@ impl<'a> Resolver<'a> {
             ast::Statement::Empty => out.push(nt::Statement::Empty),
             ast::Statement::Assign { vars, exps } => out.push(self.assign(vars, exps)),
             ast::Statement::Call(call) => out.push(nt::Statement::Call(self.call(call))),
-            ast::Statement::Label(label) => todo!(),
+            ast::Statement::Label(label) => out.push(self.label(label)),
             ast::Statement::Break => todo!(),
-            ast::Statement::Goto(token) => todo!(),
+            ast::Statement::Goto(token) => out.push(self.goto(*token)),
             ast::Statement::Block(block) => out.push(nt::Statement::Block(self.block(block))),
             ast::Statement::While { expr, block } => out.push(nt::Statement::While {
                 expr: self.expr(expr),
@@ -690,6 +721,16 @@ impl<'a> Resolver<'a> {
         self.scope_leave(&mut vec![]);
         self.function_depth -= 1;
 
+        // remove labels for this function
+        while let Some(last) = self.labels.last() {
+            let label = &self.label_table[last.0 as usize];
+            if label.func_depth > self.function_depth {
+                self.labels.pop();
+            } else {
+                break;
+            }
+        }
+
         nt::Function { parameters, body }
     }
 
@@ -728,6 +769,56 @@ impl<'a> Resolver<'a> {
                 value: self.insert_string(value.value.as_bytes()),
             },
         }
+    }
+
+    /// Resolve a goto label
+    fn label(&mut self, ast: &ast::Label) -> nt::Statement {
+        let id = self.get_label(ast.name);
+        let label = &mut self.label_table[id.0 as usize];
+        if label.defined {
+            panic!("Repeated declaration of goto label");
+        }
+        label.defined = true;
+        label.line = Some(ast.name.line);
+        nt::Statement::Label(id)
+    }
+
+    /// Resolve a goto statement
+    fn goto(&mut self, tok: Token) -> nt::Statement {
+        nt::Statement::Goto(self.get_label(tok))
+    }
+
+    /// Get a label id for a given name
+    fn get_label(&mut self, name: Token) -> nt::LabelId {
+        let s = self.insert_string(name.value.as_bytes());
+
+        for id in self.labels.iter().rev() {
+            let label = &self.label_table[id.0 as usize];
+
+            if label.func_depth != self.function_depth {
+                break;
+            }
+
+            if label.name == s {
+                return *id;
+            }
+        }
+
+        // no existing label, so make a new one
+        let id = nt::LabelId(
+            self.label_table
+                .len()
+                .try_into()
+                .expect("Too many labels within module"),
+        );
+        self.label_table.push(Label {
+            name: s,
+            line: Some(name.line),
+            defined: false,
+            func_depth: self.function_depth,
+        });
+        self.labels.push(id);
+        id
     }
 
     /// Resolve a var expression

@@ -44,6 +44,9 @@ pub struct NameContainer<T> {
     /// All variables defined or used in this tree.
     pub variable_table: Vec<Local>,
 
+    /// All labels used in this tree
+    pub label_table: Vec<Label>,
+
     /// The initial environment variable that is set prior to entering this piece
     /// of code, value of resolving `_ENV` prior to anything happening.
     pub env: VariableId,
@@ -61,6 +64,10 @@ pub struct NumberId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VariableId(pub u32);
 
+/// ID of a label
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LabelId(pub u32);
+
 /// Number in lua, converted from the string representation
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Number {
@@ -75,6 +82,13 @@ pub struct Local {
     pub name: StringId,
     pub attr_close: bool,
     pub attr_const: bool,
+}
+
+/// Goto Labels
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Label {
+    pub line: Option<usize>,
+    pub name: StringId,
 }
 
 /// A sequence of code.  Note that block and chunk are the same in lua.  A file
@@ -115,8 +129,8 @@ pub enum Statement {
         is_global_init: bool,
     },
     Call(FunctionCall),
-    Label(Label),
-    Goto(VariableId),
+    Label(LabelId),
+    Goto(LabelId),
     Block(Block),
     While {
         expr: Expression,
@@ -159,20 +173,12 @@ pub struct ReturnStatement {
     pub exprs: Vec<Expression>,
 }
 
-/// label ::= ‘::’ Name ‘::’
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Label {
-    pub name: VariableId,
-}
-
 /// funcname ::= Name {‘.’ Name} [‘:’ Name]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FunctionName {
     /// Used for local or global function declarations (depending on the kind of
     /// variable referenced)
-    DefineLocal {
-        var: VariableId,
-    },
+    DefineLocal { var: VariableId },
     DefineGlobal {
         env: VariableId,
         names: Vec<StringId>,
@@ -208,8 +214,7 @@ pub enum Var {
 }
 
 // namelist ::= Name {‘,’ Name}
-// type NameList = Vec<Token>
-// (inlined where needed, no ast node exists for this)
+
 
 /// explist ::= exp {‘,’ exp}
 /// exp ::=  nil | false | true | Numeral | LiteralString | ‘...’ | functiondef |

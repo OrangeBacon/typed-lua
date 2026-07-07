@@ -1,3 +1,7 @@
-global a = 5
-a = 6
-global function a() end
+::a::
+
+function a()
+    ::a::goto a
+end
+
+goto a
