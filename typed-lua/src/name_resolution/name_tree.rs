@@ -37,10 +37,6 @@ pub struct NameContainer<T> {
     /// Strings used in the program (which may not be utf-8 due to escape sequence processing)
     pub string_table: Vec<Vec<u8>>,
 
-    /// Numbers used in the program, stored as a separate table so that `Eq` works
-    /// on the tree (but not this container).
-    pub number_table: Vec<Number>,
-
     /// All variables defined or used in this tree.
     pub variable_table: Vec<Local>,
 
@@ -56,10 +52,6 @@ pub struct NameContainer<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringId(pub u32);
 
-/// ID of a number within the number table
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NumberId(pub u32);
-
 /// ID of a variable name
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VariableId(pub u32);
@@ -69,7 +61,7 @@ pub struct VariableId(pub u32);
 pub struct LabelId(pub u32);
 
 /// Number in lua, converted from the string representation
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone)]
 pub enum Number {
     Integer(u64),
     Float(f64),
@@ -222,7 +214,7 @@ pub enum Var {
 pub enum Expression {
     Nil,
     Bool(bool),
-    Number(NumberId),
+    Number(Number),
     String(StringId),
     Function(Function),
     Prefix(PrefixExpression),

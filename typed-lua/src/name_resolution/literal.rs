@@ -1,11 +1,11 @@
-use std::{char, iter::Peekable, str::Chars};
+use std::{char, hash::Hash, iter::Peekable, str::Chars};
 
 use super::name_tree as nt;
 use crate::{Resolver, parser::lexer::Token};
 
 impl Resolver<'_> {
     /// Convert a number token into a number literal
-    pub(super) fn number(&mut self, tok: Token) -> nt::NumberId {
+    pub(super) fn number(&mut self, tok: Token) -> nt::Number {
         if tok.value.starts_with("0x") || tok.value.starts_with("0X") {
             self.hex_number(tok.value)
         } else {
@@ -14,46 +14,24 @@ impl Resolver<'_> {
     }
 
     /// Parse a hexadecimal number literal
-    fn hex_number(&mut self, num: &str) -> nt::NumberId {
-        let id = nt::NumberId(
-            self.number_table
-                .len()
-                .try_into()
-                .expect("Too many number literals within module"),
-        );
-        self.number_table.push(nt::Number::Float(1.0));
-
+    fn hex_number(&mut self, num: &str) -> nt::Number {
         if num.contains(['.', 'p', 'P']) {
-            self.number_table.push(nt::Number::Float(hex_flt(num)));
-            id
+            nt::Number::Float(hex_flt(num))
         } else {
-            // hex integer
-            self.number_table
-                .push(nt::Number::Integer(hex_int(&num[2..])));
-            id
+            nt::Number::Integer(hex_int(&num[2..]))
         }
     }
 
     /// Parse a non-hexadecimal number literal
-    fn decimal_number(&mut self, num: &str) -> nt::NumberId {
-        let id = nt::NumberId(
-            self.number_table
-                .len()
-                .try_into()
-                .expect("Too many number literals within module"),
-        );
-
-        let num = if num.contains(['.', 'e', 'E']) {
+    fn decimal_number(&mut self, num: &str) -> nt::Number {
+        if num.contains(['.', 'e', 'E']) {
             nt::Number::Float(num.parse::<f64>().unwrap())
         } else {
             match num.parse::<u64>() {
                 Ok(n) => nt::Number::Integer(n),
                 Err(_) => nt::Number::Float(num.parse::<f64>().unwrap()),
             }
-        };
-
-        self.number_table.push(num);
-        id
+        }
     }
 
     /// Convert a string token into a string literal
@@ -251,5 +229,63 @@ fn unicode_escape(out: &mut Vec<u8>, input: &mut Peekable<Chars<'_>>) {
             out.push(0b1000_0000 | ((num & 0b11_1111) as u8));
         }
         0x8000_0000..=u32::MAX => panic!("Unicode number greater than 2^31-1"),
+    }
+}
+
+impl PartialEq for nt::Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Integer(l), Self::Integer(r)) => l == r,
+            (Self::Float(l), Self::Float(r)) => {
+                // all NaNs are equal (and positive), -0.0 != +0.0
+                if l.is_nan() && r.is_nan() {
+                    true
+                } else {
+                    l.total_cmp(r).is_eq()
+                }
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for nt::Number {}
+
+impl PartialOrd for nt::Number {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for nt::Number {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (nt::Number::Integer(l), nt::Number::Integer(r)) => l.cmp(r),
+            (nt::Number::Integer(_), nt::Number::Float(_)) => std::cmp::Ordering::Less,
+            (nt::Number::Float(_), nt::Number::Integer(_)) => std::cmp::Ordering::Greater,
+            (nt::Number::Float(l), nt::Number::Float(r)) => match (l.is_nan(), r.is_nan()) {
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                (false, false) => l.total_cmp(r),
+            },
+        }
+    }
+}
+
+impl Hash for nt::Number {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            nt::Number::Integer(i) => i.hash(state),
+            nt::Number::Float(f) => {
+                if f.is_nan() {
+                    state.write_u64(f64::NAN.to_bits());
+                } else {
+                    state.write_u64(f.to_bits());
+                }
+            }
+        }
     }
 }

@@ -19,8 +19,6 @@ pub struct Resolver<'a> {
     string_table: Vec<Vec<u8>>,
     string_lookup: HashMap<Vec<u8>, nt::StringId>,
 
-    number_table: Vec<nt::Number>,
-
     variable_table: Vec<nt::Local>,
     locals: Vec<Variable>,
     scope_depth: usize,
@@ -70,7 +68,6 @@ impl<'a> Resolver<'a> {
             ast,
             string_table: vec![],
             string_lookup: HashMap::new(),
-            number_table: vec![],
             variable_table: vec![],
             locals: vec![],
             scope_depth: 0,
@@ -130,7 +127,6 @@ impl<'a> Resolver<'a> {
         nt::NameContainer {
             tree,
             string_table: self.string_table,
-            number_table: self.number_table,
             variable_table: self.variable_table,
             label_table,
             env,
