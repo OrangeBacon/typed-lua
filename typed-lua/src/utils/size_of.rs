@@ -53,6 +53,24 @@ impl SizeOf for str {
     }
 }
 
+impl SizeOf for bool {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+impl SizeOf for u8 {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+impl SizeOf for usize {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
 impl Display for Size {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const SUFFIX: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
