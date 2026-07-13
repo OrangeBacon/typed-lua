@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let resolver = typed_lua::Resolver::new(&ast);
     let resolved = resolver.run();
 
-    println!("{:?}", resolved);
+    println!("{}", typed_lua::NtPrint::new(&resolved));
 
     Ok(())
 }

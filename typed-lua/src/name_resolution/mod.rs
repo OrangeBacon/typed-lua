@@ -4,6 +4,7 @@ use crate::parser::{ast, lexer::Token};
 
 mod literal;
 mod name_tree;
+pub mod name_tree_print;
 mod name_tree_size;
 
 use hashbrown::{HashMap, hash_map::EntryRef};
@@ -125,16 +126,13 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
-        let nt = nt::NameContainer {
+        nt::NameContainer {
             tree,
             string_table: self.string_table,
             variable_table: self.variable_table,
             label_table,
             env,
-        };
-
-        println!("{}", crate::utils::Size(crate::utils::SizeOf::size(&nt)));
-        nt
+        }
     }
 
     /// Resolve a block.
