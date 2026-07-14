@@ -145,8 +145,7 @@ impl<'a> Resolver<'a> {
         }
         let ret_stat = block.ret_stat.as_ref().map(|s| self.ret_stat(s));
 
-        let mut close = vec![];
-        self.scope_leave(&mut close);
+        let close = self.scope_leave();
 
         nt::Block {
             statements,
@@ -264,8 +263,7 @@ impl<'a> Resolver<'a> {
 
         let expr = self.expr(expr);
 
-        let mut leave = vec![];
-        self.scope_leave(&mut leave);
+        let leave = self.scope_leave();
 
         out.push(nt::Statement::Repeat {
             block: nt::Block {
@@ -318,7 +316,7 @@ impl<'a> Resolver<'a> {
         let block = self.block(block);
 
         // leave will only close the loop variable which isn't close
-        self.scope_leave(&mut vec![]);
+        let _ = self.scope_leave();
 
         out.push(nt::Statement::For {
             name: var,
@@ -372,7 +370,7 @@ impl<'a> Resolver<'a> {
         let block = self.block(block);
 
         // leave will only close the loop variable which isn't close
-        self.scope_leave(&mut vec![]);
+        let _ = self.scope_leave();
 
         out.push(nt::Statement::ForEach {
             names,
@@ -740,7 +738,7 @@ impl<'a> Resolver<'a> {
         let body = self.block(&function.body);
 
         // only contains function parameters which cant be <close>
-        self.scope_leave(&mut vec![]);
+        let _ = self.scope_leave();
         self.function_depth -= 1;
 
         // remove labels for this function
@@ -1007,8 +1005,11 @@ impl<'a> Resolver<'a> {
         self.scope_depth += 1;
     }
 
-    /// Leave a lexical scope
-    fn scope_leave(&mut self, out: &mut Vec<nt::Statement>) {
+    /// Leave a lexical scope, returns the variables that should be closed at
+    /// the end of the scope.
+    #[must_use = "Ignoring variable `<close>` annotations"]
+    fn scope_leave(&mut self) -> Vec<nt::VariableId> {
+        let mut out = vec![];
         self.scope_depth -= 1;
 
         while let Some(last) = self.locals.last() {
@@ -1019,7 +1020,7 @@ impl<'a> Resolver<'a> {
 
             if depth > self.scope_depth {
                 if let Variable::Var { id: var, .. } = last {
-                    out.push(nt::Statement::ScopeEnd(*var));
+                    out.push(*var);
                 }
 
                 self.locals.pop();
@@ -1027,6 +1028,8 @@ impl<'a> Resolver<'a> {
                 break;
             }
         }
+
+        out
     }
 
     /// Insert a string into the string table.

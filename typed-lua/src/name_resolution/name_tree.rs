@@ -91,7 +91,7 @@ pub struct Label {
 pub struct Block {
     pub statements: Vec<Statement>,
     pub ret_stat: Option<ReturnStatement>,
-    pub close: Vec<Statement>,
+    pub close: Vec<VariableId>,
 }
 
 /// stat ::=  ‘;’ |
@@ -131,7 +131,7 @@ pub enum Statement {
     Repeat {
         block: Block,
         expr: Expression,
-        block_end: Vec<Statement>,
+        block_end: Vec<VariableId>,
     },
     If {
         expr: Expression,
