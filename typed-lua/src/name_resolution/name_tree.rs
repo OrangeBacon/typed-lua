@@ -26,7 +26,7 @@
 //! - Break statements are converted into goto and a label (and checked whether
 //!   the break is in a loop that can be broken out of).
 
-use crate::parser::ast;
+use crate::{parser::ast, utils::OrderedFloat};
 
 /// Container to associate variables and strings with a provided name tree
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -61,10 +61,10 @@ pub struct VariableId(pub u32);
 pub struct LabelId(pub u32);
 
 /// Number in lua, converted from the string representation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Number {
     Integer(u64),
-    Float(f64),
+    Float(OrderedFloat),
 }
 
 /// Local variables
