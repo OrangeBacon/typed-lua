@@ -63,12 +63,12 @@ impl TreeCtx {
     /// `value` is the text to be written to describe the node, `len` is the
     /// number of child elements expected, `size` is the byte size of this individual
     /// node.
-    pub fn print(
+    pub fn print<T: SizeOf>(
         &self,
         f: &mut Formatter<'_>,
         value: &str,
         len: impl Into<Option<usize>>,
-        size: &(impl ?Sized + SizeOf),
+        size: &T,
     ) -> fmt::Result {
         if !self.prefix.is_empty() {
             write!(f, "{}", self.prefix)?;
@@ -84,7 +84,7 @@ impl TreeCtx {
             write!(f, "[{len}]")?;
         }
 
-        let size = size.size();
+        let size = size.size() + std::mem::size_of::<T>();
         if self.top_level || (size as f64) > (self.top_size as f64) * 0.2 {
             write!(f, " <{}>", Size(size))?;
         }

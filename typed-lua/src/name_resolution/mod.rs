@@ -786,7 +786,7 @@ impl<'a> Resolver<'a> {
                 table: self.field_list(table),
             },
             ast::FunctionArgs::String { value } => nt::FunctionArgs::String {
-                value: self.insert_string(value.value.as_bytes()),
+                value: self.string(*value),
             },
         }
     }

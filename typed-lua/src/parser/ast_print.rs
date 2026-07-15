@@ -54,7 +54,7 @@ impl<'a, T> AstPrint<'a, T> {
     }
 }
 
-impl<T: ?Sized + SizeOf> AstPrint<'_, T> {
+impl<T: SizeOf> AstPrint<'_, T> {
     /// Display the name of this node
     fn print(&self, f: &mut Formatter<'_>, name: &str) -> fmt::Result {
         self.tree.print(f, name, None, self.node)
@@ -73,7 +73,7 @@ impl<T: ?Sized + SizeOf> AstPrint<'_, T> {
 
 impl Display for AstPrint<'_, str> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.print(f, self.node)
+        self.tree.print(f, self.node, None, &self.node)
     }
 }
 

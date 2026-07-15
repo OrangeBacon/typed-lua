@@ -3,10 +3,11 @@ use std::fmt::{self, Display, Formatter};
 use crate::{
     name_resolution::name_tree::*,
     parser::ast,
-    utils::{SizeOf, TreeCtx},
+    utils::{OrderedFloat, SizeOf, TreeCtx},
 };
 
-/// Pretty printer for all AST nodes
+/// Pretty printer for all name tree nodes
+#[derive(Debug, Clone)]
 pub struct NtPrint<'a, T: ?Sized> {
     node: &'a T,
     tree: TreeCtx,
@@ -99,7 +100,7 @@ impl<'a, T> NtPrint<'a, T> {
     }
 }
 
-impl<T: ?Sized + SizeOf> NtPrint<'_, T> {
+impl<T: SizeOf> NtPrint<'_, T> {
     /// Display the name of this node
     fn print(&self, f: &mut Formatter<'_>, name: &str) -> fmt::Result {
         self.tree.print(f, name, None, self.node)
@@ -118,7 +119,7 @@ impl<T: ?Sized + SizeOf> NtPrint<'_, T> {
 
 impl Display for NtPrint<'_, str> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.print(f, self.node)
+        self.tree.print(f, self.node, None, &self.node)
     }
 }
 
@@ -131,6 +132,16 @@ impl Display for NtPrint<'_, &str> {
 impl Display for NtPrint<'_, usize> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.print(f, &format!("{}", *self.node))
+    }
+}
+
+impl Display for NtPrint<'_, bool> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if *self.node {
+            self.print(f, "True")
+        } else {
+            self.print(f, "False")
+        }
     }
 }
 
@@ -178,7 +189,7 @@ where
 
 impl Display for NtPrint<'_, StringId> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.print(f, &self.display_string(*self.node))
+        self.print(f, &format!("\"{}\"", self.display_string(*self.node)))
     }
 }
 
@@ -215,98 +226,337 @@ impl Display for NtPrint<'_, LabelId> {
 
 impl Display for NtPrint<'_, Number> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            Number::Integer(num) => self.print(f, &format!("Integer {num}")),
+            Number::Float(OrderedFloat(num)) => self.print(f, &format!("Float {num}")),
+        }
     }
 }
 
-// impl Display for NtPrint<'_, Local> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-//         todo!()
-//     }
-// }
-
-// impl Display for NtPrint<'_, Label> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-//         todo!()
-//     }
-// }
-
 impl Display for NtPrint<'_, Block> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        //todo!()
+        let count = self.node.statements.len() + self.node.ret_stat.is_some() as usize;
+
+        self.print_len(f, "Block", count)?;
+        let full_count = count + (!self.node.close.is_empty()) as usize;
+
+        for (idx, s) in self.node.statements.iter().enumerate() {
+            if idx + 1 == full_count {
+                self.last(s).fmt(f)?;
+            } else {
+                self.child(s).fmt(f)?;
+            }
+        }
+
+        if let Some(ret) = &self.node.ret_stat {
+            if self.node.close.is_empty() {
+                self.last(ret).fmt(f)?;
+            } else {
+                self.child(ret).fmt(f)?;
+            }
+        }
+
+        if !self.node.close.is_empty() {
+            self.last(&self.node.close)
+                .name("Closed Variables")
+                .fmt(f)?;
+        }
+
         Ok(())
     }
 }
 
 impl Display for NtPrint<'_, Statement> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            Statement::Empty => self.print(f, "Empty Statement"),
+            Statement::Assign {
+                vars,
+                exps,
+                is_global_init,
+            } => {
+                self.print(f, "Assign")?;
+                self.child(is_global_init).name("Init Globals").fmt(f)?;
+                self.child(vars).name("Variables").fmt(f)?;
+                self.last(exps).name("Expressions").fmt(f)
+            }
+            Statement::Call(call) => self.swap(call).fmt(f),
+            Statement::Label(label) => self.swap(label).name("Label").fmt(f),
+            Statement::Goto(label) => self.swap(label).name("Goto").fmt(f),
+            Statement::Block(block) => self.swap(block).fmt(f),
+            Statement::While { expr, block } => {
+                self.print(f, "While")?;
+                self.child(expr).name("Condition").fmt(f)?;
+                self.last(block).fmt(f)
+            }
+            Statement::Repeat {
+                block,
+                expr,
+                block_end,
+            } => {
+                self.print(f, "Repeat")?;
+                self.child(block).fmt(f)?;
+
+                if block_end.is_empty() {
+                    self.last(expr).name("Condition").fmt(f)
+                } else {
+                    self.child(expr).name("Condition").fmt(f)?;
+                    self.last(block_end).name("Closed Variables").fmt(f)
+                }
+            }
+            Statement::If {
+                expr,
+                block,
+                elseif,
+                else_block,
+            } => {
+                let count = 1 + elseif.len() + else_block.is_some() as usize;
+                self.print_len(f, "If", count)?;
+
+                let a = std::iter::once((expr, block));
+                let b = elseif.iter().map(|(a, b)| (a, b));
+                for (idx, e) in a.chain(b).enumerate() {
+                    if idx + 1 == count {
+                        self.last(&e).fmt(f)?;
+                    } else {
+                        self.child(&e).fmt(f)?;
+                    }
+                }
+
+                if let Some(else_block) = else_block {
+                    self.last(else_block).name("Else").fmt(f)?;
+                }
+
+                Ok(())
+            }
+            Statement::For {
+                name,
+                initial,
+                limit,
+                step,
+                block,
+            } => {
+                self.print(f, "For")?;
+                self.child(name).name("Name").fmt(f)?;
+                self.child(initial).name("Initial").fmt(f)?;
+                self.child(limit).name("Limit").fmt(f)?;
+                if let Some(step) = step {
+                    self.child(step).name("Step").fmt(f)?;
+                }
+                self.last(block).fmt(f)
+            }
+            Statement::ForEach {
+                names,
+                exprs,
+                block,
+            } => {
+                self.print(f, "For Each")?;
+                self.child(names).name("Names").fmt(f)?;
+                self.child(exprs).name("Values").fmt(f)?;
+                self.last(block).fmt(f)
+            }
+            Statement::Function { name, body } => {
+                self.print(f, "Function")?;
+                self.child(name).name("Name").fmt(f)?;
+                self.last(body).fmt(f)
+            }
+            Statement::ScopeStart(id) => self.swap(id).name("Scope Start").fmt(f),
+            Statement::ScopeEnd(id) => self.swap(id).name("Scope End").fmt(f),
+        }
+    }
+}
+
+impl Display for NtPrint<'_, (&Expression, &Block)> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.print(f, "Branch")?;
+        self.child(self.node.0).name("Condition").fmt(f)?;
+        self.last(self.node.1).fmt(f)
     }
 }
 
 impl Display for NtPrint<'_, ReturnStatement> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        self.swap(&self.node.exprs).name("Return").fmt(f)
     }
 }
 
 impl Display for NtPrint<'_, FunctionName> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            FunctionName::DefineLocal { var } => self.swap(var).name("Define Local").fmt(f),
+            FunctionName::DefineGlobal { env, names } => {
+                self.print(f, "Define Global")?;
+                self.child(env).name("Environment").fmt(f)?;
+                self.last(names).name("Path").fmt(f)
+            }
+            FunctionName::Path {
+                start,
+                names,
+                method,
+            } => {
+                self.print(f, "Assignment")?;
+                self.child(start).name("Root").fmt(f)?;
+
+                if let Some(meth) = method {
+                    self.child(names).name("Path").fmt(f)?;
+                    self.last(meth).name("Method").fmt(f)
+                } else {
+                    self.last(names).name("Path").fmt(f)
+                }
+            }
+        }
     }
 }
 
 impl Display for NtPrint<'_, Var> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            Var::LocalName(id) => self.swap(id).name("Local").fmt(f),
+            Var::GlobalNames { env, names } => {
+                self.print(f, "Global")?;
+                self.child(env).name("Environment").fmt(f)?;
+                self.last(names).fmt(f)
+            }
+            Var::Index { first, index } => {
+                self.print(f, "Index")?;
+                self.child(first).name("Base").fmt(f)?;
+                self.last(index).name("Index").fmt(f)
+            }
+            Var::Dot { first, name } => {
+                self.print(f, "Dot Access")?;
+                self.child(first).name("Base").fmt(f)?;
+                self.last(name).name("Value").fmt(f)
+            }
+        }
     }
 }
 
 impl Display for NtPrint<'_, Expression> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            Expression::Nil => self.swap("Nil").fmt(f),
+            Expression::Bool(b) => {
+                if *b {
+                    self.swap("True").fmt(f)
+                } else {
+                    self.swap("False").fmt(f)
+                }
+            }
+            Expression::Number(number) => self.swap(number).fmt(f),
+            Expression::String(id) => self.swap(id).name("String").fmt(f),
+            Expression::Function(function) => self.swap(function).fmt(f),
+            Expression::Prefix(prefix_expression) => self.swap(prefix_expression).fmt(f),
+            Expression::Table(field_list) => self.swap(field_list).name("Table").fmt(f),
+            Expression::Binary { left, op, right } => {
+                self.print(f, "Binary")?;
+                self.child(left.as_ref()).name("Left").fmt(f)?;
+                self.child(op).name("Op").fmt(f)?;
+                self.last(right.as_ref()).name("Right").fmt(f)
+            }
+            Expression::Unary { expr, op } => {
+                self.print(f, "Unary")?;
+                self.child(op).name("Op").fmt(f)?;
+                self.last(expr.as_ref()).fmt(f)
+            }
+        }
     }
 }
 
 impl Display for NtPrint<'_, PrefixExpression> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            PrefixExpression::Var(var) => self.swap(var.as_ref()).fmt(f),
+            PrefixExpression::Call(call) => self.swap(call).fmt(f),
+            PrefixExpression::Expr(expr) => {
+                self.print(f, "Parenthesised")?;
+                self.last(expr.as_ref()).fmt(f)
+            }
+        }
     }
 }
 
 impl Display for NtPrint<'_, FunctionCall> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        self.print(f, "Call")?;
+        self.child(self.node.receiver.as_ref())
+            .name("Receiver")
+            .fmt(f)?;
+
+        if let Some(method) = self.node.method_name {
+            self.child(&method).name("Method").fmt(f)?;
+        }
+
+        self.last(&self.node.args).fmt(f)
     }
 }
 
 impl Display for NtPrint<'_, FunctionArgs> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            FunctionArgs::Call { exprs } => self.swap(exprs).name("Arguments").fmt(f),
+            FunctionArgs::Table { table } => self.swap(table).name("Table Arg").fmt(f),
+            FunctionArgs::String { value } => self.swap(value).name("String Arg").fmt(f),
+        }
     }
 }
 
 impl Display for NtPrint<'_, Function> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        self.print(f, "Function")?;
+        self.child(&self.node.parameters).fmt(f)?;
+        self.last(&self.node.body).fmt(f)
     }
 }
 
 impl Display for NtPrint<'_, ParameterList> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        let count = self.node.self_var.is_some() as usize
+            + self.node.names.len()
+            + self.node.var_name.is_some() as usize;
+
+        self.print_len(f, "Parameters", count)?;
+
+        if let Some(name) = self.node.self_var {
+            self.last(&name).name("Self var").fmt(f)?
+        };
+
+        for (idx, s) in self.node.names.iter().enumerate() {
+            if idx + 1 == count {
+                self.last(s).fmt(f)?;
+            } else {
+                self.child(s).fmt(f)?;
+            }
+        }
+
+        if let Some(name) = self.node.var_name {
+            self.last(&name).name("Var args").fmt(f)?
+        };
+
+        Ok(())
     }
 }
 
 impl Display for NtPrint<'_, FieldList> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        self.swap(&self.node.fields).name("Fields").fmt(f)
     }
 }
 
 impl Display for NtPrint<'_, Field> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self.node {
+            Field::Index { index, expr } => {
+                self.print(f, "Index Field")?;
+                self.child(index).name("Index").fmt(f)?;
+                self.last(expr).name("Value").fmt(f)
+            }
+            Field::Assign { name, expr } => {
+                self.print(f, "Assign Field")?;
+                self.child(name).name("Name").fmt(f)?;
+                self.last(expr).name("Value").fmt(f)
+            }
+            Field::Exp { expr } => self.swap(expr).name("Expr Field").fmt(f),
+        }
     }
 }
 
