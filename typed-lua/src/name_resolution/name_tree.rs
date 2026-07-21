@@ -156,7 +156,6 @@ pub enum Statement {
         body: Function,
     },
     ScopeStart(VariableId),
-    ScopeEnd(VariableId),
 }
 
 /// retstat ::= return [explist] [‘;’]

@@ -106,7 +106,6 @@ impl SizeOf for Statement {
             } => names.size() + exprs.size() + block.size(),
             Statement::Function { name, body } => name.size() + body.size(),
             Statement::ScopeStart(variable_id) => variable_id.size(),
-            Statement::ScopeEnd(variable_id) => variable_id.size(),
         }
     }
 }

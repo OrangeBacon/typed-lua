@@ -361,7 +361,6 @@ impl Display for NtPrint<'_, Statement> {
                 self.last(body).fmt(f)
             }
             Statement::ScopeStart(id) => self.swap(id).name("Scope Start").fmt(f),
-            Statement::ScopeEnd(id) => self.swap(id).name("Scope End").fmt(f),
         }
     }
 }
