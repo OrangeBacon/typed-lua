@@ -18,8 +18,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("{}", typed_lua::AstPrint::new(&ast));
     let resolver = typed_lua::Resolver::new(&ast);
     let resolved = resolver.run();
-
     println!("{}", typed_lua::NtPrint::new(&resolved));
+
+    let hir = typed_lua::HirBuilder::new(&resolved);
+    let hir = hir.run();
+    println!("{:?}", hir);
 
     Ok(())
 }

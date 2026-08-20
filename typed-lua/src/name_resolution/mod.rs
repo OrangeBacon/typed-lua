@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::parser::{ast, lexer::Token};
 
 mod literal;
-mod name_tree;
+pub mod name_tree;
 pub mod name_tree_print;
 mod name_tree_size;
 
