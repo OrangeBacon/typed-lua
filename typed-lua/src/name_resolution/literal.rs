@@ -27,7 +27,7 @@ impl Resolver<'_> {
         if num.contains(['.', 'e', 'E']) {
             nt::Number::Float(OrderedFloat(num.parse::<f64>().unwrap()))
         } else {
-            match num.parse::<u64>() {
+            match num.parse::<i64>() {
                 Ok(n) => nt::Number::Integer(n),
                 Err(_) => nt::Number::Float(OrderedFloat(num.parse::<f64>().unwrap())),
             }
@@ -49,8 +49,8 @@ impl Resolver<'_> {
 }
 
 /// Parse a hexadecimal string into an integer, wrapping if too long.
-fn hex_int(s: &str) -> u64 {
-    let mut res: u64 = 0;
+fn hex_int(s: &str) -> i64 {
+    let mut res: i64 = 0;
 
     for ch in s.chars() {
         let digit = match ch {

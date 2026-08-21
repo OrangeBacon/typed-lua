@@ -7,6 +7,8 @@
 //! into a lot of smaller, lower level instructions, e.g. add turns into type checks,
 //! an actual add, metatable lookup, calling one of the possible metatables, etc.
 
+use crate::utils::OrderedFloat;
+
 /// Root of the High-level IR
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hir {
@@ -28,10 +30,31 @@ pub struct Instruction {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Opcode {
     // statements
-    Return { value: Option<InstructionId> },
-    Tuple { values: Vec<InstructionId> },
+    Block {
+        instructions: Vec<Instruction>,
+    },
+    Return {
+        value: Option<InstructionId>,
+    },
 
     // expressions
+    Tuple {
+        values: Vec<InstructionId>,
+    },
     Nil,
     Bool(bool),
+    Float(OrderedFloat),
+    Int(i64),
+
+    /// numerical negative, Negate(a) = -a
+    Negate(InstructionId),
+
+    /// table length, Length(a) = #a
+    Length(InstructionId),
+
+    /// logical not, Not(a) = not a
+    Not(InstructionId),
+
+    /// bitwise not, BitNot(a) = ~a
+    BitNot(InstructionId),
 }

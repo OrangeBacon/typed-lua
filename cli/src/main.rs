@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hir = typed_lua::HirBuilder::new(&resolved);
     let hir = hir.run();
-    println!("{:?}", hir);
+    println!("{}", typed_lua::HirPrint::new(&hir));
 
     Ok(())
 }

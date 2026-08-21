@@ -1,1 +1,1 @@
-return nil, nil, true
+return not -13,#-#3

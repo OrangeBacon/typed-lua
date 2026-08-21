@@ -63,7 +63,7 @@ pub struct LabelId(pub u32);
 /// Number in lua, converted from the string representation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Number {
-    Integer(u64),
+    Integer(i64),
     Float(OrderedFloat),
 }
 

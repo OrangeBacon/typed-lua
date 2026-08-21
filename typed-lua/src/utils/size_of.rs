@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::utils::OrderedFloat;
+
 /// Get the size of a structure, including all included allocations
 pub trait SizeOf {
     /// get the size of self
@@ -71,6 +73,18 @@ impl SizeOf for usize {
     }
 }
 
+impl SizeOf for OrderedFloat {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+impl SizeOf for i64 {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
 impl Display for Size {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const SUFFIX: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
@@ -78,7 +92,11 @@ impl Display for Size {
         let mut num = self.0 as f64;
         for suffix in SUFFIX {
             if num <= 1024.0 {
-                return write!(f, "{num:.1} {suffix}");
+                if *suffix == "B" {
+                    return write!(f, "{num} B");
+                } else {
+                    return write!(f, "{num:.1} {suffix}");
+                }
             }
             num /= 1024.0;
         }

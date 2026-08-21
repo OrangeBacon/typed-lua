@@ -1,5 +1,7 @@
-use crate::{hir::hir_tree::*, name_resolution::name_tree as nt};
+use crate::{hir::hir_tree::*, name_resolution::name_tree as nt, parser::ast::UnaryOperator};
 
+pub mod hir_print;
+mod hir_size;
 mod hir_tree;
 
 pub struct HirBuilder<'a> {
@@ -50,14 +52,33 @@ impl<'a> HirBuilder<'a> {
         match expr {
             nt::Expression::Nil => self.inst(out, Opcode::Nil),
             nt::Expression::Bool(b) => self.inst(out, Opcode::Bool(*b)),
-            nt::Expression::Number(number) => todo!(),
+            nt::Expression::Number(nt::Number::Float(f)) => self.inst(out, Opcode::Float(*f)),
+            nt::Expression::Number(nt::Number::Integer(i)) => self.inst(out, Opcode::Int(*i)),
             nt::Expression::String(string_id) => todo!(),
             nt::Expression::Function(function) => todo!(),
             nt::Expression::Prefix(prefix_expression) => todo!(),
             nt::Expression::Table(field_list) => todo!(),
             nt::Expression::Binary { left, op, right } => todo!(),
-            nt::Expression::Unary { expr, op } => todo!(),
+            nt::Expression::Unary { expr, op } => self.unary(out, expr, *op),
         }
+    }
+
+    /// Convert a unary operator
+    fn unary(
+        &mut self,
+        out: &mut Vec<Instruction>,
+        expr: &nt::Expression,
+        op: UnaryOperator,
+    ) -> InstructionId {
+        let prev = self.expr(out, expr);
+        let op = match op {
+            UnaryOperator::Negate => Opcode::Negate,
+            UnaryOperator::Not => Opcode::Not,
+            UnaryOperator::Hash => Opcode::Length,
+            UnaryOperator::Tilde => Opcode::BitNot,
+        };
+
+        self.inst(out, op(prev))
     }
 
     /// Create a tuple contiaining all provided values.  If only one value
