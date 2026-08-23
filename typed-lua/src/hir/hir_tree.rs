@@ -57,4 +57,89 @@ pub enum Opcode {
 
     /// bitwise not, BitNot(a) = ~a
     BitNot(InstructionId),
+
+    Plus {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Minus {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Multiply {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Divide {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    FloorDivide {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Exponent {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Modulo {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    BitAnd {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    BitXor {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    BitOr {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    RightShift {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    LeftShift {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Concat {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Less {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    LessEqual {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Greater {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    GreaterEqual {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Equal {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    NotEqual {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    And {
+        left: InstructionId,
+        right: InstructionId,
+    },
+    Or {
+        left: InstructionId,
+        right: InstructionId,
+    },
 }

@@ -1,4 +1,8 @@
-use crate::{hir::hir_tree::*, name_resolution::name_tree as nt, parser::ast::UnaryOperator};
+use crate::{
+    hir::hir_tree::*,
+    name_resolution::name_tree as nt,
+    parser::ast::{BinaryOperator, UnaryOperator},
+};
 
 pub mod hir_print;
 mod hir_size;
@@ -58,9 +62,46 @@ impl<'a> HirBuilder<'a> {
             nt::Expression::Function(function) => todo!(),
             nt::Expression::Prefix(prefix_expression) => todo!(),
             nt::Expression::Table(field_list) => todo!(),
-            nt::Expression::Binary { left, op, right } => todo!(),
+            nt::Expression::Binary { left, op, right } => self.binary(out, left, right, *op),
             nt::Expression::Unary { expr, op } => self.unary(out, expr, *op),
         }
+    }
+
+    /// Convert a binary operator
+    fn binary(
+        &mut self,
+        out: &mut Vec<Instruction>,
+        left: &nt::Expression,
+        right: &nt::Expression,
+        op: BinaryOperator,
+    ) -> InstructionId {
+        let left = self.expr(out, left);
+        let right = self.expr(out, right);
+        let op = match op {
+            BinaryOperator::Plus => Opcode::Plus { left, right },
+            BinaryOperator::Minus => Opcode::Minus { left, right },
+            BinaryOperator::Multiply => Opcode::Multiply { left, right },
+            BinaryOperator::Divide => Opcode::Divide { left, right },
+            BinaryOperator::FloorDivide => Opcode::FloorDivide { left, right },
+            BinaryOperator::Exponent => Opcode::Exponent { left, right },
+            BinaryOperator::Modulo => Opcode::Modulo { left, right },
+            BinaryOperator::BitAnd => Opcode::BitAnd { left, right },
+            BinaryOperator::BitXor => Opcode::BitXor { left, right },
+            BinaryOperator::BitOr => Opcode::BitOr { left, right },
+            BinaryOperator::RightShift => Opcode::RightShift { left, right },
+            BinaryOperator::LeftShift => Opcode::LeftShift { left, right },
+            BinaryOperator::Concat => Opcode::Concat { left, right },
+            BinaryOperator::Less => Opcode::Less { left, right },
+            BinaryOperator::LessEqual => Opcode::LessEqual { left, right },
+            BinaryOperator::Greater => Opcode::Greater { left, right },
+            BinaryOperator::GreaterEqual => Opcode::GreaterEqual { left, right },
+            BinaryOperator::Equal => Opcode::Equal { left, right },
+            BinaryOperator::NotEqual => Opcode::NotEqual { left, right },
+            BinaryOperator::And => Opcode::And { left, right },
+            BinaryOperator::Or => Opcode::Or { left, right },
+        };
+
+        self.inst(out, op)
     }
 
     /// Convert a unary operator
