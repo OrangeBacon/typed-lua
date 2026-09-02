@@ -1,1 +1,1 @@
-return 3 + 4 * 5 .. 7
+return "hello\x05"

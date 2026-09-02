@@ -7,13 +7,16 @@
 //! into a lot of smaller, lower level instructions, e.g. add turns into type checks,
 //! an actual add, metatable lookup, calling one of the possible metatables, etc.
 
-use crate::utils::OrderedFloat;
+use crate::{name_resolution::name_tree::StringId, utils::OrderedFloat};
 
 /// Root of the High-level IR
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hir {
     /// All instructions in the root of a module
     pub instructions: Vec<Instruction>,
+
+    /// String table, from the name tree
+    pub strings: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -45,6 +48,7 @@ pub enum Opcode {
     Bool(bool),
     Float(OrderedFloat),
     Int(i64),
+    String(StringId),
 
     /// numerical negative, Negate(a) = -a
     Negate(InstructionId),

@@ -2,8 +2,11 @@ use crate::{hir::hir_tree::*, utils::SizeOf};
 
 impl SizeOf for Hir {
     fn size(&self) -> usize {
-        let Hir { instructions } = self;
-        instructions.size()
+        let Hir {
+            instructions,
+            strings,
+        } = self;
+        instructions.size() + strings.size()
     }
 }
 
@@ -30,6 +33,7 @@ impl SizeOf for Opcode {
             Opcode::Bool(b) => b.size(),
             Opcode::Float(f) => f.size(),
             Opcode::Int(i) => i.size(),
+            Opcode::String(s) => s.size(),
             Opcode::Negate(instruction_id) => instruction_id.size(),
             Opcode::Length(instruction_id) => instruction_id.size(),
             Opcode::Not(instruction_id) => instruction_id.size(),

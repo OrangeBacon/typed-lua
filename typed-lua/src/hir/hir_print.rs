@@ -1,8 +1,7 @@
 use std::fmt::{self, Display};
 
 use crate::{
-    hir::hir_tree::*,
-    utils::{Size, SizeOf},
+    hir::hir_tree::*, utils::{Size, SizeOf, fmt_bstr},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -37,7 +36,7 @@ impl<'a> HirPrint<'a> {
         match op {
             Opcode::Block { instructions } => {
                 f.write_str("block")?;
-                self.block(f, instructions)
+                self.block(f, instructions, instructions)
             }
             Opcode::Return { value: Some(id) } => write!(f, "return {id}"),
             Opcode::Return { value: None } => f.write_str("return"),
@@ -54,6 +53,7 @@ impl<'a> HirPrint<'a> {
             Opcode::Bool(b) => write!(f, "bool {b}"),
             Opcode::Float(float) => write!(f, "float {float}"),
             Opcode::Int(i) => write!(f, "int {i}"),
+            Opcode::String(s) => write!(f, "string \"{}\"", fmt_bstr(& self.hir.strings[s.0 as usize])),
             Opcode::Negate(id) => write!(f, "negate {id}"),
             Opcode::Length(id) => write!(f, "len {id}"),
             Opcode::Not(id) => write!(f, "not {id}"),
@@ -83,10 +83,15 @@ impl<'a> HirPrint<'a> {
     }
 
     /// Print the contents of a block, assuming that its name has already been printed
-    fn block(&mut self, f: &mut fmt::Formatter<'_>, ops: &Vec<Instruction>) -> fmt::Result {
+    fn block(
+        &mut self,
+        f: &mut fmt::Formatter<'_>,
+        ops: &Vec<Instruction>,
+        size: impl SizeOf,
+    ) -> fmt::Result {
         write!(f, "[{}]", ops.len())?;
 
-        let size = ops.size() + std::mem::size_of::<Instruction>();
+        let size = size.size();
         if self.top_level || (size as f64) > (self.top_size as f64) * 0.2 {
             write!(f, " <{}>", Size(size))?;
         }
@@ -125,7 +130,7 @@ impl Display for HirPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Hir")?;
         let mut this = *self;
-        this.block(f, &self.hir.instructions)
+        this.block(f, &self.hir.instructions, self.hir)
     }
 }
 

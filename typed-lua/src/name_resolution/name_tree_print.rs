@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use crate::{
     name_resolution::name_tree::*,
     parser::ast,
-    utils::{OrderedFloat, SizeOf, TreeCtx},
+    utils::{OrderedFloat, SizeOf, TreeCtx, fmt_bstr},
 };
 
 /// Pretty printer for all name tree nodes
@@ -73,30 +73,8 @@ impl<'a, T> NtPrint<'a, T> {
     /// Get a printable version of a string from the name tree.  No quotation
     /// marks, un-printable characters are escaped.
     fn display_string(&self, id: StringId) -> String {
-        let mut input = self.strings[id.0 as usize].as_slice();
-        let mut out = String::new();
-
-        loop {
-            match std::str::from_utf8(input) {
-                Ok(valid) => {
-                    out.extend(valid.escape_default());
-                    break;
-                }
-                Err(error) => {
-                    let (valid, after_valid) = input.split_at(error.valid_up_to());
-                    out.extend(std::str::from_utf8(valid).unwrap().escape_default());
-
-                    let invalid_len = error.error_len().unwrap_or(after_valid.len());
-                    for &byte in &after_valid[0..=invalid_len] {
-                        out.push_str(&format!(r"\x{:X}", byte));
-                    }
-
-                    input = &after_valid[invalid_len..];
-                }
-            }
-        }
-
-        out
+        let input = self.strings[id.0 as usize].as_slice();
+        fmt_bstr(input)
     }
 }
 

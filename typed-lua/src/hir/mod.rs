@@ -27,6 +27,7 @@ impl<'a> HirBuilder<'a> {
     pub fn run(mut self) -> Hir {
         Hir {
             instructions: self.block(&self.tree.tree),
+            strings: self.tree.string_table.clone(),
         }
     }
 
@@ -58,7 +59,7 @@ impl<'a> HirBuilder<'a> {
             nt::Expression::Bool(b) => self.inst(out, Opcode::Bool(*b)),
             nt::Expression::Number(nt::Number::Float(f)) => self.inst(out, Opcode::Float(*f)),
             nt::Expression::Number(nt::Number::Integer(i)) => self.inst(out, Opcode::Int(*i)),
-            nt::Expression::String(string_id) => todo!(),
+            nt::Expression::String(s) => self.inst(out, Opcode::String(*s)),
             nt::Expression::Function(function) => todo!(),
             nt::Expression::Prefix(prefix_expression) => todo!(),
             nt::Expression::Table(field_list) => todo!(),
