@@ -1,7 +1,8 @@
 use std::fmt::{self, Display};
 
 use crate::{
-    hir::hir_tree::*, utils::{Size, SizeOf, fmt_bstr},
+    hir::hir_tree::*,
+    utils::{Size, SizeOf, fmt_bstr},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -53,32 +54,13 @@ impl<'a> HirPrint<'a> {
             Opcode::Bool(b) => write!(f, "bool {b}"),
             Opcode::Float(float) => write!(f, "float {float}"),
             Opcode::Int(i) => write!(f, "int {i}"),
-            Opcode::String(s) => write!(f, "string \"{}\"", fmt_bstr(& self.hir.strings[s.0 as usize])),
-            Opcode::Negate(id) => write!(f, "negate {id}"),
-            Opcode::Length(id) => write!(f, "len {id}"),
-            Opcode::Not(id) => write!(f, "not {id}"),
-            Opcode::BitNot(id) => write!(f, "bit_not {id}"),
-            Opcode::Plus { left, right } => write!(f, "plus {left} {right}"),
-            Opcode::Minus { left, right } => write!(f, "minus {left} {right}"),
-            Opcode::Multiply { left, right } => write!(f, "multiply {left} {right}"),
-            Opcode::Divide { left, right } => write!(f, "divide {left} {right}"),
-            Opcode::FloorDivide { left, right } => write!(f, "floor_divide {left} {right}"),
-            Opcode::Exponent { left, right } => write!(f, "exponent {left} {right}"),
-            Opcode::Modulo { left, right } => write!(f, "modulo {left} {right}"),
-            Opcode::BitAnd { left, right } => write!(f, "bit_and {left} {right}"),
-            Opcode::BitXor { left, right } => write!(f, "bit_xor {left} {right}"),
-            Opcode::BitOr { left, right } => write!(f, "bit_or {left} {right}"),
-            Opcode::RightShift { left, right } => write!(f, "right_shift {left} {right}"),
-            Opcode::LeftShift { left, right } => write!(f, "left_shift {left} {right}"),
-            Opcode::Concat { left, right } => write!(f, "concat {left} {right}"),
-            Opcode::Less { left, right } => write!(f, "less {left} {right}"),
-            Opcode::LessEqual { left, right } => write!(f, "less_equal {left} {right}"),
-            Opcode::Greater { left, right } => write!(f, "greater {left} {right}"),
-            Opcode::GreaterEqual { left, right } => write!(f, "greater_equal {left} {right}"),
-            Opcode::Equal { left, right } => write!(f, "equal {left} {right}"),
-            Opcode::NotEqual { left, right } => write!(f, "not_Equal {left} {right}"),
-            Opcode::And { left, right } => write!(f, "and {left} {right}"),
-            Opcode::Or { left, right } => write!(f, "or {left} {right}"),
+            Opcode::String(s) => write!(
+                f,
+                "string \"{}\"",
+                fmt_bstr(&self.hir.strings[s.0 as usize])
+            ),
+            Opcode::Binary { left, op, right } => write!(f, "{op:?} {left} {right}"),
+            Opcode::Unary(op, expr) => write!(f, "{op:?} {expr}"),
         }
     }
 

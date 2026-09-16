@@ -1,7 +1,6 @@
 use crate::{
     hir::hir_tree::*,
     name_resolution::name_tree as nt,
-    parser::ast::{BinaryOperator, UnaryOperator},
 };
 
 pub mod hir_print;
@@ -63,64 +62,24 @@ impl<'a> HirBuilder<'a> {
             nt::Expression::Function(function) => todo!(),
             nt::Expression::Prefix(prefix_expression) => todo!(),
             nt::Expression::Table(field_list) => todo!(),
-            nt::Expression::Binary { left, op, right } => self.binary(out, left, right, *op),
-            nt::Expression::Unary { expr, op } => self.unary(out, expr, *op),
+            nt::Expression::Binary { left, op, right } => {
+                let left = self.expr(out, &left);
+                let right = self.expr(out, &right);
+
+                self.inst(
+                    out,
+                    Opcode::Binary {
+                        left,
+                        op: *op,
+                        right,
+                    },
+                )
+            }
+            nt::Expression::Unary { expr, op } => {
+                let inner = self.expr(out, expr);
+                self.inst(out, Opcode::Unary(*op, inner))
+            }
         }
-    }
-
-    /// Convert a binary operator
-    fn binary(
-        &mut self,
-        out: &mut Vec<Instruction>,
-        left: &nt::Expression,
-        right: &nt::Expression,
-        op: BinaryOperator,
-    ) -> InstructionId {
-        let left = self.expr(out, left);
-        let right = self.expr(out, right);
-        let op = match op {
-            BinaryOperator::Plus => Opcode::Plus { left, right },
-            BinaryOperator::Minus => Opcode::Minus { left, right },
-            BinaryOperator::Multiply => Opcode::Multiply { left, right },
-            BinaryOperator::Divide => Opcode::Divide { left, right },
-            BinaryOperator::FloorDivide => Opcode::FloorDivide { left, right },
-            BinaryOperator::Exponent => Opcode::Exponent { left, right },
-            BinaryOperator::Modulo => Opcode::Modulo { left, right },
-            BinaryOperator::BitAnd => Opcode::BitAnd { left, right },
-            BinaryOperator::BitXor => Opcode::BitXor { left, right },
-            BinaryOperator::BitOr => Opcode::BitOr { left, right },
-            BinaryOperator::RightShift => Opcode::RightShift { left, right },
-            BinaryOperator::LeftShift => Opcode::LeftShift { left, right },
-            BinaryOperator::Concat => Opcode::Concat { left, right },
-            BinaryOperator::Less => Opcode::Less { left, right },
-            BinaryOperator::LessEqual => Opcode::LessEqual { left, right },
-            BinaryOperator::Greater => Opcode::Greater { left, right },
-            BinaryOperator::GreaterEqual => Opcode::GreaterEqual { left, right },
-            BinaryOperator::Equal => Opcode::Equal { left, right },
-            BinaryOperator::NotEqual => Opcode::NotEqual { left, right },
-            BinaryOperator::And => Opcode::And { left, right },
-            BinaryOperator::Or => Opcode::Or { left, right },
-        };
-
-        self.inst(out, op)
-    }
-
-    /// Convert a unary operator
-    fn unary(
-        &mut self,
-        out: &mut Vec<Instruction>,
-        expr: &nt::Expression,
-        op: UnaryOperator,
-    ) -> InstructionId {
-        let prev = self.expr(out, expr);
-        let op = match op {
-            UnaryOperator::Negate => Opcode::Negate,
-            UnaryOperator::Not => Opcode::Not,
-            UnaryOperator::Hash => Opcode::Length,
-            UnaryOperator::Tilde => Opcode::BitNot,
-        };
-
-        self.inst(out, op(prev))
     }
 
     /// Create a tuple contiaining all provided values.  If only one value
